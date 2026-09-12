@@ -4,140 +4,101 @@
 
 - Repository: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
-- Candidate Version: `2026091207`
-- Implementation Commit: `7f20a61bb51e96c5f14ecad26dfa4677d9154478`
-- CI Run: `34716750221` — `success`
-- Artifact: `zonoe-ipa-download-2026091207-baota-native-build`
-- Artifact ID: `10305265521`
-- Native ZIP: `zonoe-ipa-download-2026091207-baota-native.zip`
-- ZIP SHA256: `29f04695938a91160e4168e30d2461d0fb72e7d5cd0f1ee94c674bc1be10c8dd`
-- Production runtime verified baseline: `2026091206`
-- Current phase: `Phase 1.3 — BaoTa Native Installer Hardening & GitHub Online Update`
+- Version: `2026091208`
+- Implementation: `09d47d6d1c21ca2adc4b9ea90c089d089a131d8d`
+- Final hardening commit: `d5c2bfe4f1d9ccf92b7f24a97e52cc312da3c9c9`
+- CI Run: `34717796655` success
+- Artifact: `zonoe-ipa-download-2026091208-baota-native-build`
+- Artifact ID: `10305745680`
+- Native ZIP SHA256: `16b35ea0c67519382a471603044f7f62777690e127f3d41fb605ed92fbe83cf9`
+- Current Phase: `Phase 1.4 — BaoTa Native Admin Online Update`
 
-## Architecture
+## Runtime Architecture
 
 ```text
-Browser
-  ↓
+Browser / Admin
+  ↓ HTTPS
 BaoTa Nginx
-  ├─ /, /assets/*, /files/* -> <site>/public
+  ├─ /, /assets/*, /files/* -> public/
   ├─ /api/*                 -> 127.0.0.1:3000
   └─ /download/*            -> 127.0.0.1:3000
 
-systemd: zonoe-api
-  ↓
-Node.js 22 + Express
-  ↓
-Local PostgreSQL
+zonoe-api.service (User=zonoe, non-root)
+  └─ Node/Express -> local PostgreSQL
+
+Admin online update:
+Admin UI -> POST /api/v1/admin/system/update
+         -> data/update-runtime/admin-update-request.json
+         -> zonoe-updater.path
+         -> zonoe-updater.service (root oneshot)
+         -> scripts/admin-update-worker.sh
+         -> update.sh / install-online.sh / lib-deploy.sh
+         -> backup + GitHub download + SHA256 + deploy + rollback
 ```
 
-Docker remains compatibility/migration-only source code and is excluded from the BaoTa Native ZIP.
+## Admin Online Update Behavior
 
-## What 1207 Adds
+后台侧栏新增“在线更新”：
 
-### PostgreSQL HBA self-healing
+- 打开页面自动查询 GitHub Stable Release。
+- 显示当前版本、最新版本、更新通道、Release 说明和任务状态。
+- 有更高 Stable 时按钮显示“更新到 <version>”。
+- 点击后先二次确认，再提交固定更新任务。
+- 更新期间每 2.5 秒轮询状态；API 重启短暂断开后会继续恢复查询。
+- 成功显示 from -> to；失败提示 `data/update-runtime/admin-update.log`。
+- Web 更新不允许强制降级。本地版本高于 Stable 时显示“预览/开发版”，按钮禁用。
 
-`install.sh` now validates the app's actual TCP password connection. If BaoTa PostgreSQL rejects it with `ident` or another earlier host rule:
+### Security boundary
 
-1. Locate the active HBA file using `SHOW hba_file`.
-2. Back it up under project `backups/`.
-3. Prepend a managed block only for the configured ZONOE DB/user on localhost.
-4. Reload PostgreSQL.
-5. Retry password authentication and fail closed if it still does not work.
+不要改成 `zonoe-api` 直接 root，也不要给 Web API 暴露任意 shell、任意路径或任意 Git ref 参数。当前设计的关键点是：API 只写一个固定 JSON 请求；root worker 只运行受控 updater。
 
-Do not broaden HBA to all databases/users.
+后台 POST 继续受 `requireAdmin` + CSRF 校验保护。
 
-### BaoTa protected files
+## 1207 Installer/Updater Foundations Still Required
 
-Never delete the whole `public/` directory. Both install and update preserve:
+1208 依赖并复用 1207 已完成的：
 
-- `public/.user.ini`
-- `public/.well-known/`
-- `public/files` runtime link
+- 宝塔 PostgreSQL HBA 自动兼容/备份。
+- `.user.ini` / `.well-known` 保留。
+- 无 `pgcrypto` 硬依赖。
+- `/healthz` 读取 `VERSION`。
+- GitHub Release/Tag/Branch CLI 更新。
+- SHA256 校验。
+- 程序、前端、数据库更新前备份。
+- 失败自动尝试回滚。
+- 更新锁和历史日志。
 
-### GitHub online updater
+## Real Server Status
 
-Production:
+最后真实运行验证基线是 `2026091206`，站点 `https://ios.zonoeios.xyz` 已确认：首页、Assets、API、systemd、本机 PostgreSQL、HTTPS、登录页正常。
+
+`2026091208` 当前是 CI Green，尚未在真实服务器完成后台按钮 E2E。因此不要把“CI Green”写成“1208 Production Verified”。
+
+第一次启用后台在线更新，需要把服务器 bootstrap 到 1208。1208 安装过程中的 `npm ci` 会通过 root-only `postinstall` 安装并启用 `zonoe-updater.path`。之后未来 Stable 版本即可在后台按钮更新。
+
+## Validation After 1208 Bootstrap
 
 ```bash
-cd /www/wwwroot/<site>
-bash update.sh
+systemctl status zonoe-updater.path --no-pager
+systemctl status zonoe-api --no-pager
+curl -fsS http://127.0.0.1:3000/healthz
 ```
 
-Check only:
+后台验证：登录 `/admin` -> “在线更新”，确认能读取当前版本和 GitHub Stable 状态。
 
-```bash
-bash update.sh --check
-```
-
-Specific release:
-
-```bash
-bash update.sh --tag download-v2026091207
-```
-
-Preview branch/ref:
-
-```bash
-bash update.sh --branch feature/baota-native-deploy-v1
-```
-
-Stable/tag mode requires SHA256 validation. The updater backs up current source, `.env`, frontend and DB before staging the new version. Logs:
-
-- `data/update.log`
-- `data/update-history.log`
-
-### Health endpoint
-
-`/healthz` now reads the root `VERSION` file. CI asserts the returned version exactly matches the build candidate.
+下一次发布一个更高 Stable 后，从这里点击一次“更新到 ...”，验证完整 E2E。
 
 ## Critical Behavior Not To Break
 
-1. IPA large files must not be proxied through Node.
-2. `/download/{appId}` must record statistics before redirect.
-3. `.env`, `data/uploads`, `backups` must survive update/migration.
-4. Native API stays on `127.0.0.1:3000`.
-5. BaoTa web root stays `<site>/public`.
-6. Never recursively remove BaoTa's protected `public/.user.ini`.
-7. PostgreSQL HBA automation must remain narrowly scoped to the app DB/user + localhost.
-8. Stable online update must verify SHA256 before deployment.
-9. Old Docker volumes are never auto-deleted during migration.
+1. IPA 大文件不由 Node 中转。
+2. `/download/{appId}` 记录统计后跳转。
+3. `data/uploads`、`.env`、`backups` 更新中保留。
+4. API 只监听 `127.0.0.1:3000`。
+5. Web API 不以 root 运行。
+6. 后台在线更新只能触发受控 updater，不能变成通用远程 shell。
+7. Web 在线更新只能向更高 Stable 前进，不能意外降级预览版。
+8. 旧 Docker 数据卷在迁移确认前不要删除。
 
-## Verification Status
+## Next Task
 
-Passed in 1207 CI:
-
-- migrations / integration tests
-- production build
-- Native API smoke
-- healthz version match
-- frontend static smoke
-- login/admin navigation source checks
-- shell validation
-- BaoTa installer contract
-- GitHub updater contract
-- package validation
-- native ZIP SHA256/integrity
-
-Still requires real host verification:
-
-- 1207 clean install without manual HBA edit
-- 1206 -> 1207 GitHub online update E2E
-- failed-update rollback E2E
-- Docker -> Native real-data migration
-
-## Stable Release Rule
-
-Do not publish 1207 Stable merely because CI is green. Promote only after clean-install + online-update E2E on BaoTa. Current public Stable remains behind this candidate.
-
-## Files To Read First
-
-1. `PROJECT_STATE.json`
-2. `ROADMAP.md`
-3. `KNOWN_ISSUES.md`
-4. `CHANGELOG_DEV.md`
-5. `install.sh`
-6. `update.sh`
-7. `install-online.sh`
-8. `scripts/lib-deploy.sh`
-9. `.github/workflows/ci-release.yml`
+Bootstrap 真实站点到 1208，验证 updater path/UI。随后发布高于 1208 的 Stable 候选并完成一次后台按钮更新 E2E；通过后再正式把后台在线更新标记 Production Verified。

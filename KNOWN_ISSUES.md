@@ -1,59 +1,56 @@
 # KNOWN_ISSUES
 
-## P0 — 1207 仍需真实全新安装验证
+## P0 — 1208 后台在线更新尚未真实 E2E
 
 - 状态：Open / CI Green
-- 版本：`2026091207`
-- Run：`34716750221` success。
-- 1207 已把真实服务器遇到的 PostgreSQL `ident` / HBA 兼容、`.user.ini` immutable、无用 `pgcrypto` 等问题收敛到代码。
-- 仍需在全新宝塔环境证明“不手工改配置也能完成安装”。
-- 关闭条件：全新站点从部署包到首页/API/Admin 全链路零人工修补通过。
+- 版本：`2026091208`
+- CI Run：`34717796655` success。
+- 已验证：代码构建、API smoke、前端 smoke、Shell、BaoTa contract、GitHub updater contract、部署包完整性。
+- 尚未验证：真实宝塔上从后台点击“在线更新”后，systemd path/worker、备份、GitHub 下载、部署、API 重启、最终 success 状态完整走通。
+- 关闭条件：真实站点从一个较低 Stable 通过后台按钮成功升级到较高 Stable。
 
-## P0 — GitHub 在线更新需要真实服务器 E2E
-
-- 状态：Open / Implemented
-- `bash update.sh` 已支持 Latest Stable、指定 Tag、指定 Branch/Ref。
-- Stable/Tag 强制 SHA256 校验。
-- 已实现备份、互斥锁、日志、更新历史与程序回滚。
-- CI 已通过 updater contract，但尚未在真实生产目录完成 1206 -> 1207 更新。
-- 关闭条件：真实服务器更新成功，并至少验证一次可控失败后的程序回滚。
-
-## P0 — 旧 Docker -> Native PostgreSQL 自动迁移需要真实数据验证
-
-- 状态：Open / Implemented
-- 迁移前会 `pg_dump`，停止旧栈但不删除 volume。
-- 关闭条件：真实旧站点的 App、版本、管理员、统计、uploads 全部核对通过。
-
-## P0 — Stable Release 仍落后
+## P0 — 1208 需要一次性 bootstrap 到真实站点
 
 - 状态：Open
-- 1207 当前仅 feature branch CI Artifact，不是公开 Stable。
-- 关闭条件：1207 clean install + online update E2E + Docker migration 验证通过后发布新 Stable。
+- 当前真实运行验证基线仍为 1206 assisted runtime。
+- 后台按钮和 `zonoe-updater.path/service` 只有安装 1208 后才存在。
+- 1208 的 root-only npm `postinstall` 会在真实 Native 安装/更新时创建并启用 updater path；CI 环境不会执行系统级安装。
+- 关闭条件：生产站 1208 安装完成，`systemctl status zonoe-updater.path` active，后台出现“在线更新”。
 
-## P1 — PostgreSQL HBA 自动修改需要真实矩阵验证
+## P0 — Stable Release 仍故意落后
 
-- 状态：Open / Narrowly Scoped
-- 自动规则仅针对配置的 ZONOE 数据库、用户和 localhost。
-- 修改前备份 HBA，修改后 reload + 实际密码连接复测。
-- 仍需在不同宝塔/PostgreSQL 版本确认路径与规则行为。
+- 状态：Open / Intentional
+- 1208 当前只在 feature branch CI Artifact 中，不应把旧 `releases/latest` 当成 1208。
+- 后台默认只查询 Stable，因此生产站如果先 bootstrap 到 1208，而公开 Stable 仍较低，会显示“当前为预览/开发版”，不会降级。
+- 关闭条件：真实按钮 E2E 准备完成后发布新的 Stable，并验证下一版后台更新。
 
-## P1 — 回滚目前以程序/静态文件恢复为主
+## P0 — 旧 Docker -> Native PostgreSQL 仍需真实数据迁移验证
+
+- 状态：Open / Implemented
+- 自动迁移已有数据库导出、停止旧 Docker、不删除 volume、本机 DB 导入逻辑。
+- 仍需用真实旧站数据核对管理员、App、版本、下载源和统计。
+- 安全原则：迁移确认前不要删除旧 Docker volume。
+
+## P1 — 全新空站安装矩阵仍未完成
 
 - 状态：Open
-- 更新前会保存 PostgreSQL dump，但自动回滚不会自动 drop/recreate 数据库。
-- 原因：对生产数据库做自动破坏性还原风险更高。
-- 如果未来 migration 引入不可逆 schema 变更，需要升级为显式数据库 rollback 策略。
+- 1207/1208 已自动处理本次真实机暴露的 HBA、`.user.ini`、`pgcrypto` 等问题，但尚未在第二台干净宝塔机器从零完成一次无人干预安装。
+- 关闭条件：空站导入 Native ZIP 后无需手改 PostgreSQL/文件属性即可成功上线。
+
+## P1 — 后台 updater worker 是 root，必须保持受控接口
+
+- 状态：Security Invariant
+- `zonoe-api` 仍是非 root；root 仅存在于 `zonoe-updater.service` oneshot。
+- API 只能写固定 request JSON，不能接受任意 shell 命令、脚本路径、URL 或 Git ref。
+- Web 更新为 forward-only，不允许强制降级。
+- 任何后续功能都不得把 updater 变成通用远程执行接口。
 
 ## P2 — Docker 兼容文件仍保留
 
 - 状态：Accepted
-- Native ZIP 排除 Docker runtime。
-- 等真实迁移验证完成后再决定是否删除兼容代码。
+- 源码继续保留 Docker 兼容/迁移路径，但 BaoTa Native ZIP 排除 Docker 运行文件。
 
-## 已关闭 / 已代码修复
+## P2 — `insatll.sh` 拼写入口保留
 
-- `ALTER ROLE ... :'dbpass'` psql 变量调用兼容：Fixed。
-- `pgcrypto.control` 缺失：Fixed（删除未使用硬依赖）。
-- `public/.user.ini` immutable 阻止 `rm -rf public`：Fixed in 1207。
-- 登录页 `l is not a function`：Fixed in 1206。
-- `/healthz` 硬编码旧版本：Fixed in 1207。
+- 状态：Accepted / Compatibility
+- 仅为历史宝塔兼容；正式入口仍是 `install.sh`。

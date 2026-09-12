@@ -2,66 +2,53 @@
 
 ## 当前阶段
 
-- 阶段：Phase 1.3 — 宝塔原生安装器加固 + GitHub 在线更新
-- 版本：`2026091207`
+- 阶段：Phase 1.4 — 宝塔 Native 后台在线更新
+- 版本：`2026091208`
 - Branch：`feature/baota-native-deploy-v1`
-- Implementation Commit：`7f20a61bb51e96c5f14ecad26dfa4677d9154478`
-- CI：GitHub Actions Run `34716750221`，结果 `success`
-- Artifact：`zonoe-ipa-download-2026091207-baota-native-build`
-- Native ZIP：`zonoe-ipa-download-2026091207-baota-native.zip`
-- ZIP SHA256：`29f04695938a91160e4168e30d2461d0fb72e7d5cd0f1ee94c674bc1be10c8dd`
+- 最终实现 Commit：`d5c2bfe4f1d9ccf92b7f24a97e52cc312da3c9c9`
+- CI：Run `34717796655`，结果 `success`
+- Artifact：`zonoe-ipa-download-2026091208-baota-native-build`
+- Native ZIP SHA256：`16b35ea0c67519382a471603044f7f62777690e127f3d41fb605ed92fbe83cf9`
+- 当前状态：后台在线更新 UI、API、root updater worker、现有备份/回滚链路均已完成并 CI Green；等待真实宝塔后台按钮 E2E。
 
-## 1207 目标
+## 1208 目标
 
-1206 已在真实宝塔服务器跑通首页、API、PostgreSQL、systemd、HTTPS 与后台登录。1207 不做业务大改，重点把真实部署中暴露出的人工修复全部收进安装器，并补上后续长期使用需要的 GitHub 在线更新。
+将 1207 的命令行 GitHub 更新能力真正放进后台管理：管理员登录后进入“在线更新”，即可检查当前/最新版本、查看 Release 说明并点击更新。
 
-### 已完成
+安全边界保持不变：`zonoe-api` 仍以低权限 `zonoe` 用户运行，不允许 Web 进程直接以 root 执行任意命令。后台只写入一个固定格式的更新请求；root `zonoe-updater.path/service` 只调用受控的 `scripts/admin-update-worker.sh`，最终复用 `update.sh` 的 GitHub 下载、SHA256 校验、备份、安装和回滚。
+
+## 已完成
 
 | 项目 | 状态 |
 | --- | --- |
-| PostgreSQL `ident` / `pg_hba.conf` 自动兼容 | Done |
-| 修改 HBA 前自动备份 | Done |
-| HBA 规则仅限 ZONOE DB/User + localhost | Done |
-| 不再删除整个 `public/` | Done |
-| 保留宝塔 `.user.ini` | Done |
-| 保留 `.well-known/` | Done |
-| 安装日志 `data/install.log` | Done |
-| 备用安装入口 `scripts/native-install.sh` | Done |
-| `/healthz` 自动读取 `VERSION` | Done |
-| GitHub Latest Stable 在线更新 | Done |
-| 指定 Release Tag 更新 | Done |
-| 指定 Branch/Ref 预览更新 | Done |
-| Release SHA256 校验 | Done |
-| 更新前程序/数据库/静态文件备份 | Done |
-| 更新失败程序回滚 | Done |
-| 更新互斥锁与日志/历史 | Done |
-| CI updater contract | Done |
-| Native ZIP 打包校验 | Done |
+| 后台“在线更新”入口 | Done |
+| 当前版本 / 最新 Stable 显示 | Done |
+| GitHub Release 说明显示 | Done |
+| 管理员登录 + CSRF 保护 | Done |
+| API 非 root | Done |
+| root systemd updater worker | Done |
+| 更新状态轮询 | Done |
+| 更新日志 | Done |
+| 更新前程序/前端/数据库备份 | Done |
+| 失败回滚 | Done |
+| Web 更新只允许向高版本前进 | Done |
+| 本地版本高于 Stable 时禁止降级 | Done |
+| Production Build / API / frontend smoke | Done |
+| GitHub updater contract | Done |
+| 1208 Native ZIP 校验 | Done |
 
-## 在线更新入口
+## 下一步
 
-```bash
-cd /www/wwwroot/your-site
-bash update.sh
-```
+1. 在当前真实站点一次性 bootstrap 到 `2026091208`。
+2. 确认 `zonoe-updater.path` 为 active，后台出现“在线更新”。
+3. 发布一个高于当前版本的 Stable 候选版本。
+4. 从后台点击一次更新，验证：检查更新 -> 提交任务 -> 自动备份 -> 下载/校验 -> 部署 -> API 重启 -> 状态变 success。
+5. 再做全新空站安装和旧 Docker -> Native 真实数据迁移验证。
+6. 以上完成后再将后台在线更新标记 Production Verified，并正式使用 Stable 自动更新流程。
 
-常用：
+## 当前不做
 
-```bash
-bash update.sh --check
-bash update.sh --tag download-v2026091207
-bash update.sh --branch feature/baota-native-deploy-v1
-```
-
-正式生产默认只走 GitHub Latest Stable；`--branch` 用于预览/开发验证。
-
-## 当前还不能关闭的验证项
-
-1. 在全新宝塔服务器使用 1207 做一次零人工安装，确认不再手工改 `pg_hba.conf`。
-2. 在真实 1206 站点执行一次 1206 -> 1207 在线更新 E2E，并验证备份、日志、健康检查与失败回滚路径。
-3. 旧 Docker -> Native 使用真实数据完成迁移核对。
-4. 上述通过后再发布新的 Stable Release。
-
-## 稳定版原则
-
-`2026091207` 当前是 **CI Green 候选版本**，不是已发布 Stable。当前生产运行验证基线仍是 `2026091206`。1207 通过真实 clean install + online update E2E 后再进入 Stable。
+- 不让 Node API 获得 root 权限。
+- 不提供后台任意 shell / 任意 Git Ref 执行入口。
+- 不从后台强制降级到旧 Stable。
+- 未完成真实按钮 E2E 前，不把 1208 擅自发布为 Stable。
