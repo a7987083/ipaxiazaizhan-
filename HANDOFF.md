@@ -4,30 +4,25 @@
 
 - Repository: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
-- Version: `2026091206`
-- Head Commit: `3affd73f34b8c362db843bd3a2ce88f0263ad777`
-- Commit message: `fix: harden login navigation and add route smoke v2026091206`
-- Workflow: `.github/workflows/ci-release.yml`
-- Actions Run: `34710236163`
-- CI Result: `success`
-- CI Artifact: `zonoe-ipa-download-2026091206-baota-native-build`
-- Artifact ID: `10303390781`
-- Native ZIP: `zonoe-ipa-download-2026091206-baota-native.zip`
-- Native ZIP SHA256: `8ce7508929695647327e4672d151c3ddbd3b5214c769264091d274e880e908d5`
-- Current Phase: `Phase 1.2 — BaoTa Native Deployment & Docker Exit`
-- Real BaoTa runtime: verified
-- Clean fresh install from latest ZIP: not yet verified without manual PostgreSQL HBA adjustment
+- Candidate Version: `2026091207`
+- Implementation Commit: `7f20a61bb51e96c5f14ecad26dfa4677d9154478`
+- CI Run: `34716750221` — `success`
+- Artifact: `zonoe-ipa-download-2026091207-baota-native-build`
+- Artifact ID: `10305265521`
+- Native ZIP: `zonoe-ipa-download-2026091207-baota-native.zip`
+- ZIP SHA256: `29f04695938a91160e4168e30d2461d0fb72e7d5cd0f1ee94c674bc1be10c8dd`
+- Production runtime verified baseline: `2026091206`
+- Current phase: `Phase 1.3 — BaoTa Native Installer Hardening & GitHub Online Update`
 
-## Current Architecture
+## Architecture
 
 ```text
 Browser
-  ↓ HTTPS
+  ↓
 BaoTa Nginx
   ├─ /, /assets/*, /files/* -> <site>/public
   ├─ /api/*                 -> 127.0.0.1:3000
-  ├─ /download/*            -> 127.0.0.1:3000
-  └─ /healthz               -> 127.0.0.1:3000
+  └─ /download/*            -> 127.0.0.1:3000
 
 systemd: zonoe-api
   ↓
@@ -36,119 +31,113 @@ Node.js 22 + Express
 Local PostgreSQL
 ```
 
-Default BaoTa deployment no longer needs Docker. Docker files remain only for compatibility/migration and are excluded from the Native BaoTa ZIP.
+Docker remains compatibility/migration-only source code and is excluded from the BaoTa Native ZIP.
 
-## Real Production Verification Completed
+## What 1207 Adds
 
-On the real BaoTa host the following were observed working:
+### PostgreSQL HBA self-healing
 
-- `zonoe-api.service` active/running.
-- Node API listening on `127.0.0.1:3000`.
-- local `/healthz` returns success.
-- local `/api/v1/home` returns settings/categories from PostgreSQL.
-- public HTTPS homepage returns 200.
-- public `/healthz` works through BaoTa Nginx.
-- public `/api/v1/home` works through BaoTa Nginx.
-- actual hashed JS asset returns 200 with immutable cache headers.
-- PostgreSQL migration and seed complete successfully.
-- `/login` works in the browser after the `2026091206` frontend hotfix.
+`install.sh` now validates the app's actual TCP password connection. If BaoTa PostgreSQL rejects it with `ident` or another earlier host rule:
 
-This is enough to mark the **running production architecture** as verified. It is not yet enough to claim that a completely fresh latest ZIP install is zero-touch, because the real host required a manual HBA compatibility step during installation.
+1. Locate the active HBA file using `SHOW hba_file`.
+2. Back it up under project `backups/`.
+3. Prepend a managed block only for the configured ZONOE DB/user on localhost.
+4. Reload PostgreSQL.
+5. Retry password authentication and fail closed if it still does not work.
 
-## Real-Host Issues Found During Verification
+Do not broaden HBA to all databases/users.
 
-### 1. psql password variable expansion
+### BaoTa protected files
 
-Old installer SQL used a form that produced:
+Never delete the whole `public/` directory. Both install and update preserve:
 
-```text
-syntax error at or near ":"
-ALTER ROLE "zonoe" WITH LOGIN PASSWORD :'dbpass';
+- `public/.user.ini`
+- `public/.well-known/`
+- `public/files` runtime link
+
+### GitHub online updater
+
+Production:
+
+```bash
+cd /www/wwwroot/<site>
+bash update.sh
 ```
 
-Fixed by executing psql variable substitution through standard input.
+Check only:
 
-### 2. BaoTa protected `public/.user.ini`
+```bash
+bash update.sh --check
+```
 
-BaoTa had immutable protection on `public/.user.ini`, so deleting all of `public/` failed even as root.
+Specific release:
 
-Installer now synchronizes `apps/web/dist/` with `rsync` and preserves `.user.ini` / `.well-known` instead of deleting the entire Web Root.
+```bash
+bash update.sh --tag download-v2026091207
+```
 
-### 3. Unused pgcrypto dependency
+Preview branch/ref:
 
-`001_init.sql` contained `CREATE EXTENSION IF NOT EXISTS pgcrypto;`, but the schema did not use pgcrypto functions. BaoTa PostgreSQL did not ship `pgcrypto.control` at the expected path.
+```bash
+bash update.sh --branch feature/baota-native-deploy-v1
+```
 
-The unused extension dependency has been removed.
+Stable/tag mode requires SHA256 validation. The updater backs up current source, `.env`, frontend and DB before staging the new version. Logs:
 
-### 4. PostgreSQL ident authentication
+- `data/update.log`
+- `data/update-history.log`
 
-The real host's `pg_hba.conf` matched local TCP connections with `ident`, so Node password authentication failed even after the role password was correctly set.
+### Health endpoint
 
-The production host was fixed with application-specific local rules for the `zonoe` database/user and PostgreSQL config reload.
-
-**Important:** this remediation is still manual in the current installer. Before calling the ZIP zero-touch, add narrow HBA compatibility handling to `install.sh` and test on a clean BaoTa host.
-
-### 5. `/login` runtime crash
-
-The public site and API worked, but `/login` hit the frontend FatalBoundary with `l is not a function`.
-
-`2026091206` removes `useNavigate()` from Login/Admin navigation paths and uses `window.location.assign()` instead. CI now includes route smoke coverage, and the real browser retest passed.
+`/healthz` now reads the root `VERSION` file. CI asserts the returned version exactly matches the build candidate.
 
 ## Critical Behavior Not To Break
 
 1. IPA large files must not be proxied through Node.
-2. `/download/{appId}` must record statistics and then redirect.
-3. Download Source remains adapter-based.
-4. Mobile admin remains usable.
-5. `.env`, `data/uploads`, and `backups` must survive update/migration.
-6. Before Docker -> Native migration, export the database and never auto-delete old Docker volumes.
-7. Native API must listen only on localhost.
-8. BaoTa site Web Root must be `<site>/public`.
-9. Preserve BaoTa-managed `.user.ini` / `.well-known` when deploying frontend assets.
-10. Real runtime verification does not replace clean-install/update/migration verification.
+2. `/download/{appId}` must record statistics before redirect.
+3. `.env`, `data/uploads`, `backups` must survive update/migration.
+4. Native API stays on `127.0.0.1:3000`.
+5. BaoTa web root stays `<site>/public`.
+6. Never recursively remove BaoTa's protected `public/.user.ini`.
+7. PostgreSQL HBA automation must remain narrowly scoped to the app DB/user + localhost.
+8. Stable online update must verify SHA256 before deployment.
+9. Old Docker volumes are never auto-deleted during migration.
 
-## Remaining Risks / Work
+## Verification Status
 
-- P0: automate the PostgreSQL HBA compatibility step in `install.sh`.
-- P0: run one completely clean Native ZIP install without manual edits.
-- P0: verify Docker -> Native migration using real old data.
-- P0: publish a new Stable Release only after those deployment tests.
-- P1: run online update E2E and rollback/backup verification.
-- P2: `/healthz` still reports hard-coded `2026091201`; change it to read `VERSION`.
-- P2: Docker compatibility files remain in the repository by design.
+Passed in 1207 CI:
 
-## Current Server
+- migrations / integration tests
+- production build
+- Native API smoke
+- healthz version match
+- frontend static smoke
+- login/admin navigation source checks
+- shell validation
+- BaoTa installer contract
+- GitHub updater contract
+- package validation
+- native ZIP SHA256/integrity
 
-The currently running real site is functioning. Do not reinstall it merely to make documentation match the repository.
+Still requires real host verification:
 
-If inspecting the existing host:
+- 1207 clean install without manual HBA edit
+- 1206 -> 1207 GitHub online update E2E
+- failed-update rollback E2E
+- Docker -> Native real-data migration
 
-```bash
-systemctl status zonoe-api --no-pager
-journalctl -u zonoe-api -n 100 --no-pager
-curl -fsS http://127.0.0.1:3000/healthz
-curl -fsS http://127.0.0.1:3000/api/v1/home
-```
+## Stable Release Rule
 
-Do not expose `.env` or `data/install-info.txt` contents publicly because they contain credentials/secrets.
+Do not publish 1207 Stable merely because CI is green. Promote only after clean-install + online-update E2E on BaoTa. Current public Stable remains behind this candidate.
 
-## Next Task
-
-1. Add safe app-specific `pg_hba.conf` compatibility handling to installer.
-2. Produce next Native build and perform one clean empty-site install.
-3. Verify real Docker -> Native migration and preserved uploads/data.
-4. Publish new Stable Release.
-5. Run old Stable -> new Stable `update.sh` E2E and rollback test.
-
-## Files To Read First When Taking Over
+## Files To Read First
 
 1. `PROJECT_STATE.json`
 2. `ROADMAP.md`
 3. `KNOWN_ISSUES.md`
 4. `CHANGELOG_DEV.md`
-5. `DEPLOY.md`
-6. `install.sh`
-7. `nginx.rewrite`
+5. `install.sh`
+6. `update.sh`
+7. `install-online.sh`
 8. `scripts/lib-deploy.sh`
-9. `scripts/backup.sh`
-10. `.github/workflows/ci-release.yml`
+9. `.github/workflows/ci-release.yml`

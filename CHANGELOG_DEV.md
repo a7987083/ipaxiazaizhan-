@@ -2,91 +2,78 @@
 
 > 仅记录开发过程中实际发生的变更。面向开发/接手，不替代正式 Release Changelog。
 
-## 2026-09-13 — 2026091206 真实宝塔运行验证与登录热修复
+## 2026-09-13 — 2026091207 安装器加固与 GitHub 在线更新
 
-### 真实服务器验证
+### 宝塔 / PostgreSQL
 
-- 真实宝塔站点已验证 Native 架构可运行。
-- `zonoe-api.service`：`active (running)`。
-- API 监听：`127.0.0.1:3000`。
-- 本机 `/healthz`：通过。
-- 本机 `/api/v1/home`：通过。
-- 公网 HTTPS 首页：HTTP 200。
-- 公网 `/healthz`：通过。
-- 公网 `/api/v1/home`：通过。
-- 公网实际 JS Asset：HTTP 200。
-- PostgreSQL migration / seed：通过。
-- `/login` 在 1206 热修复后用户确认正常。
+- 将真实服务器遇到的 `Ident authentication failed for user "zonoe"` 处理正式写入安装器。
+- 安装器先使用密码连接测试；失败时通过 `SHOW hba_file` 定位真实 `pg_hba.conf`。
+- 修改前自动备份到 `backups/pg_hba.conf.<timestamp>.bak`。
+- 只在配置顶部加入 ZONOE 专用规则：应用数据库 + 应用用户 + `127.0.0.1/32` / `::1/128`。
+- 修改后执行 `pg_reload_conf()` 并再次验证密码连接，失败则终止而不是继续部署。
 
-### 实机暴露的问题与修复
+### 宝塔 public 目录兼容
 
-1. PostgreSQL 角色密码 SQL：
-   - 原 `psql -c` 方式没有展开 `:'dbpass'`，报 `syntax error at or near ':'`。
-   - 已改成通过 psql 标准输入执行变量替换。
+- 不再 `rm -rf public`。
+- React 构建使用 `rsync --delete` 增量替换应用静态文件。
+- 永久排除并保留 `public/.user.ini`、`public/.well-known/` 和运行时 `public/files`。
+- 更新/回滚路径同样不删除宝塔 `public` 根目录，解决 immutable `.user.ini` 阻塞更新的问题。
 
-2. 宝塔 `public/.user.ini`：
-   - 文件带 immutable 属性，导致 `rm -rf public` 即使 root 也失败。
-   - installer 已改为 `rsync` 静态产物并保留 `.user.ini` / `.well-known`。
+### GitHub 在线更新
 
-3. `pgcrypto`：
-   - 宝塔 PostgreSQL 缺少 `/usr/share/pgsql/extension/pgcrypto.control`。
-   - 检查 migration 后确认业务没有使用 pgcrypto 函数。
-   - 已从 `001_init.sql` 移除该无效硬依赖。
+新增/加强：
 
-4. PostgreSQL 本地认证：
-   - 生产机 `pg_hba.conf` 对本机 TCP 使用 `ident`，应用密码连接被拒绝。
-   - 真实主机已通过针对 `zonoe` 用户/数据库的 127.0.0.1 / ::1 密码认证规则解决。
-   - installer 尚未自动化这一兼容步骤，保留为下一项 P0。
+```bash
+bash update.sh
+bash update.sh --check
+bash update.sh --tag <release-tag>
+bash update.sh --branch <branch-or-ref>
+```
 
-5. 登录页运行时错误：
-   - `/login` 曾触发 FatalBoundary，错误 `l is not a function`。
-   - Login/Admin 是页面中使用 `useNavigate()` 的特殊路径。
-   - `2026091206` 改为原生 `window.location.assign()` 导航，并加入登录/后台 route smoke，真实浏览器复测通过。
+- 默认查询 GitHub Latest Release。
+- Stable/Tag 更新优先下载版本化 BaoTa Native ZIP。
+- Release 模式强制下载 `.sha256` 并校验后才部署。
+- `--branch` 可按 GitHub commit SHA 固定下载归档，供开发/预览验证。
+- 更新前自动备份程序、`.env`、前端静态文件及 PostgreSQL dump。
+- 更新失败自动回滚程序与前端，并尝试恢复 API 服务。
+- 增加更新互斥锁 `data/update-runtime/update.lock`。
+- 增加 `data/update.log` 与 `data/update-history.log`。
+- ZIP/TAR 两种部署包均支持安全解包，拒绝路径穿越和归档 symlink。
 
-### 2026091206 CI / Artifact
+### API / CI
 
-- Head Commit：`3affd73f34b8c362db843bd3a2ce88f0263ad777`
-- Commit message：`fix: harden login navigation and add route smoke v2026091206`
-- GitHub Actions Run：`34710236163`
-- Run 结果：`success`
-- Artifact：`zonoe-ipa-download-2026091206-baota-native-build`
-- Artifact ID：`10303390781`
-- Artifact digest：`sha256:4a62e128000e4bb91f64fc71730d3f050141fa197e3e73ea3c95c35c41b0e6f0`
-- Native ZIP SHA256：`8ce7508929695647327e4672d151c3ddbd3b5214c769264091d274e880e908d5`
-- Generic TAR SHA256：`60e1cb6ff34299c7e012ecdb9b4afcec11d648dba70cf0122ee5f44c4a2dd861`
-- 下载 Artifact 后执行 `unzip -t`：PASS。
+- `/healthz` 不再硬编码 `2026091201`，改为读取仓库根 `VERSION`。
+- CI 校验 healthz 返回版本与 `VERSION` 一致。
+- 增加 GitHub updater contract。
+- 增加宝塔 HBA、`.user.ini`/`.well-known` 保留合同。
+- Native 包内 `install.sh` 与 `scripts/native-install.sh` 必须一致。
+
+### CI / Artifact
+
+- Implementation Commit：`7f20a61bb51e96c5f14ecad26dfa4677d9154478`
+- GitHub Actions Run：`34716750221`
+- 结果：`success`
+- Artifact：`zonoe-ipa-download-2026091207-baota-native-build`
+- Artifact ID：`10305265521`
+- Artifact digest：`sha256:6fab8e0117614a278761aca1236ab372382e5f8d050315243092efc20a5ed09b`
+- Native ZIP SHA256：`29f04695938a91160e4168e30d2461d0fb72e7d5cd0f1ee94c674bc1be10c8dd`
+- Generic TAR SHA256：`185179c602c97f17bb06ab5b431a61399abd4b916488414cc9998fbbbdfd2396`
+- 下载 Artifact 后再次执行 SHA256 与 ZIP 完整性检查：PASS。
 
 ### 当前结论
 
-- **真实生产运行链路已经验证可用。**
-- 当前站点无需重装。
-- 但不能把“当前站点可用”与“最新 ZIP 已经零人工全新安装通过”混为一谈：生产机在安装过程中人工处理过 PostgreSQL HBA。
-- 下一步先把 HBA 兼容写入 installer，再做一次空站全新安装；之后验证 Docker -> Native 真实数据迁移，再发布 Stable Release。
-- `/healthz` 的版本字段仍硬编码为 `2026091201`，仅是显示问题，待改为读取 `VERSION`。
+- 1207 代码与打包链路 CI Green。
+- 1206 的真实服务器运行验证保持有效。
+- 1207 尚需一次真实 clean install 和一次真实 GitHub online update E2E，之后再决定发布 Stable。
 
-## 2026-09-13 — 2026091203 ~ 2026091205 宝塔原生部署收敛
+## 2026-09-13 — 2026091206 登录路由热修
 
-- 新建分支 `feature/baota-native-deploy-v1`，默认部署从 Docker Compose 改为宝塔 Native。
-- 宝塔 Nginx 直接提供 React 静态文件。
-- Node API 改为 `zonoe-api` systemd 服务，仅监听 `127.0.0.1:3000`。
-- PostgreSQL 改为本机服务，Redis 原生默认不安装。
-- `auto_install.json` 运行目录改为 `/public`。
-- `nginx.rewrite` 直接代理 `/api/*`、`/download/*`、`/healthz` 到 3000。
-- `install.sh` 重写为幂等原生安装器并新增持久化安装日志。
-- 新增 `scripts/native-install.sh` 恢复入口与 `scripts/enable-https.sh`。
-- `scripts/backup.sh` / `scripts/lib-deploy.sh` 改为 Native 备份、更新和回滚路径。
-- Native ZIP 排除 Docker Compose、Dockerfile 与旧 Docker Nginx 配置，但仓库仍保留 Docker 兼容/迁移代码。
-- 1205 移除未使用的 pgcrypto migration 依赖，并保留宝塔受保护的 Web Root 文件。
+- `/login` 与 `/admin` 移除 `useNavigate()` 依赖，改为浏览器原生导航。
+- 真实服务器登录页面恢复正常。
+- 1206 CI Run `34710236163` success。
 
-## 2026-09-12 — 2026091202 白屏加固
+## 2026-09-13 — 2026091203~1205 宝塔原生部署落地
 
-- Web/API Docker 构建统一使用根 `package-lock.json` + `npm ci`。
-- `apps/web/index.html` 增加启动 fallback，`main.jsx` 增加 Fatal Error Boundary。
-- 安装与 CI 增加真实 JS Asset 健康检查。
-- 主要实现 Commit：`8b099bda1bd0cf95e2570dffa7e664767753e346`。
-- GitHub Actions Run：`34703730896`，结果 `success`。
-
-## 2026-09-12 — 项目状态文档体系
-
-- 新增 `ROADMAP.md`、`CHANGELOG_DEV.md`、`KNOWN_ISSUES.md`。
-- 更新 `HANDOFF.md`、`PROJECT_STATE.json`。
+- 默认部署从 Docker Compose 改为 BaoTa Nginx + systemd Node API + Local PostgreSQL。
+- 真实服务器逐步暴露并修复 PostgreSQL 密码 SQL、`.user.ini` immutable、`ident` HBA、无用 `pgcrypto` 等兼容问题。
+- 1206 最终完成真实运行链路验证。
