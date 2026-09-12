@@ -107,8 +107,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          IMAGE="$(docker compose images -q web)"
+          docker compose create --no-deps web
+          CID="$(docker compose ps -a -q web)"
+          test -n "$CID"
+          IMAGE="$(docker inspect --format '{{.Image}}' "$CID")"
           test -n "$IMAGE"
+          docker compose rm -sf web >/dev/null
           docker run -d --rm --name zonoe-web-smoke -p 127.0.0.1:18082:80 "$IMAGE"
           trap 'docker rm -f zonoe-web-smoke >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:18082/ >/tmp/zonoe-web-index.html 2>/dev/null && break; sleep 1; done
