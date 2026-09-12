@@ -2,11 +2,13 @@
 set -Eeuo pipefail
 
 log(){ printf '\033[1;34m[ZONOE]\033[0m %s\n' "$*"; }
+warn(){ printf '\033[1;33m[WARN]\033[0m %s\n' "$*" >&2; }
 die(){ printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "缺少命令: $1"; }
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/zonoe-ipa-download}"
 BACKUP_ROOT="${BACKUP_ROOT:-$INSTALL_DIR/backups}"
+export PATH="/www/server/pgsql/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 safe_extract(){
   local pkg="$1" dst="$2"
@@ -23,75 +25,104 @@ with tarfile.open(pkg,'r:gz') as t:
 PY
 }
 
+source_env(){
+  if [[ -f "$INSTALL_DIR/.env" ]]; then
+    set +u
+    set -a
+    source "$INSTALL_DIR/.env"
+    set +a
+    set -u
+  fi
+}
+
 backup_current(){
   mkdir -p "$BACKUP_ROOT"
   local stamp; stamp="$(date +%Y%m%d_%H%M%S)"
   CURRENT_BACKUP="$BACKUP_ROOT/$stamp"
   mkdir -p "$CURRENT_BACKUP"
-  if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
-    log "备份当前程序 -> $CURRENT_BACKUP/program.tar.gz"
-    tar --exclude='./backups' --exclude='./data' --exclude='./.env' --exclude='./.zonoe-baota-installed' -C "$INSTALL_DIR" -czf "$CURRENT_BACKUP/program.tar.gz" . || true
-    [[ -f "$INSTALL_DIR/.env" ]] && cp "$INSTALL_DIR/.env" "$CURRENT_BACKUP/.env"
-    if docker compose -f "$INSTALL_DIR/docker-compose.yml" ps postgres >/dev/null 2>&1; then
-      log "备份 PostgreSQL"
-      (cd "$INSTALL_DIR" && docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$CURRENT_BACKUP/database.sql") || true
+
+  [[ -d "$INSTALL_DIR" ]] || return 0
+  log "备份当前程序 -> $CURRENT_BACKUP/program.tar.gz"
+  tar --exclude='./backups' --exclude='./data' --exclude='./.env' --exclude='./node_modules' --exclude='./public' -C "$INSTALL_DIR" -czf "$CURRENT_BACKUP/program.tar.gz" . || true
+  [[ -f "$INSTALL_DIR/.env" ]] && cp "$INSTALL_DIR/.env" "$CURRENT_BACKUP/.env"
+  [[ -f "$INSTALL_DIR/VERSION" ]] && cp "$INSTALL_DIR/VERSION" "$CURRENT_BACKUP/VERSION"
+
+  if command -v docker >/dev/null 2>&1 && [[ -f "$INSTALL_DIR/docker-compose.yml" ]] && (cd "$INSTALL_DIR" && docker compose ps --status running --services 2>/dev/null | grep -qx postgres); then
+    log "备份旧 Docker PostgreSQL"
+    (cd "$INSTALL_DIR" && docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$CURRENT_BACKUP/database.sql") || true
+    CURRENT_MODE="docker"
+  else
+    CURRENT_MODE="native"
+    source_env
+    if command -v pg_dump >/dev/null 2>&1 && [[ -n "${DATABASE_URL:-}" ]]; then
+      log "备份本机 PostgreSQL"
+      pg_dump "$DATABASE_URL" > "$CURRENT_BACKUP/database.sql" || true
     fi
+  fi
+}
+
+stop_current(){
+  if [[ "${CURRENT_MODE:-}" == "docker" ]]; then
+    (cd "$INSTALL_DIR" && docker compose down) || true
+  else
+    systemctl stop zonoe-api >/dev/null 2>&1 || true
   fi
 }
 
 restore_backup(){
   local b="${CURRENT_BACKUP:-}"
   [[ -n "$b" && -d "$b" ]] || return 1
-  log "部署失败，开始自动回滚: $b"
-  if [[ -f "$b/program.tar.gz" ]]; then
-    find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name data ! -name backups ! -name .env ! -name .zonoe-baota-installed -exec rm -rf {} +
-    tar -xzf "$b/program.tar.gz" -C "$INSTALL_DIR"
-  fi
+  warn "部署失败，开始自动回滚: $b"
+  find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name data ! -name backups ! -name .env -exec rm -rf {} + || true
+  [[ -f "$b/program.tar.gz" ]] && tar -xzf "$b/program.tar.gz" -C "$INSTALL_DIR"
   [[ -f "$b/.env" ]] && cp "$b/.env" "$INSTALL_DIR/.env"
-  (cd "$INSTALL_DIR" && docker compose up -d --build) || true
-  if [[ -s "$b/database.sql" ]]; then
-    (cd "$INSTALL_DIR" && docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB"' < "$b/database.sql") || true
-  fi
-}
 
-health_url(){
-  local mapping hostport
-  mapping="$(cd "$INSTALL_DIR" && docker compose port nginx 80 2>/dev/null | head -1 || true)"
-  hostport="${mapping##*:}"
-  [[ "$hostport" =~ ^[0-9]+$ ]] || hostport=80
-  printf 'http://127.0.0.1:%s/healthz' "$hostport"
+  if [[ "${CURRENT_MODE:-}" == "docker" && -f "$INSTALL_DIR/docker-compose.yml" ]] && command -v docker >/dev/null 2>&1; then
+    (cd "$INSTALL_DIR" && docker compose up -d --build) || true
+    return 0
+  fi
+
+  if [[ -x "$INSTALL_DIR/install.sh" || -f "$INSTALL_DIR/install.sh" ]]; then
+    (cd "$INSTALL_DIR" && bash install.sh "${ZONOE_DOMAIN:-}") || true
+  else
+    systemctl restart zonoe-api >/dev/null 2>&1 || true
+  fi
 }
 
 deploy_package(){
   local pkg="$1"
-  need docker; need python3; need tar; need curl
-  docker compose version >/dev/null 2>&1 || die "Docker Compose v2 不可用"
+  [[ "$(id -u)" -eq 0 ]] || die "安装/更新需要 root 权限"
+  need python3; need tar; need curl
   [[ -f "$pkg" ]] || die "部署包不存在: $pkg"
+
   local tmp; tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
   safe_extract "$pkg" "$tmp/src"
-  [[ -f "$tmp/src/docker-compose.yml" ]] || die "部署包缺少 docker-compose.yml"
+  [[ -f "$tmp/src/install.sh" ]] || die "部署包缺少 install.sh"
+  [[ -f "$tmp/src/package-lock.json" ]] || die "部署包缺少 package-lock.json"
+
   backup_current
+  stop_current
+
   mkdir -p "$INSTALL_DIR/data/uploads" "$INSTALL_DIR/data/update-runtime" "$INSTALL_DIR/backups"
   local envtmp=''
   [[ -f "$INSTALL_DIR/.env" ]] && envtmp="$(mktemp)" && cp "$INSTALL_DIR/.env" "$envtmp"
-  find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name data ! -name backups ! -name .env ! -name .zonoe-baota-installed -exec rm -rf {} +
+
+  find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name data ! -name backups ! -name .env -exec rm -rf {} +
   cp -a "$tmp/src/." "$INSTALL_DIR/"
   if [[ -n "$envtmp" ]]; then cp "$envtmp" "$INSTALL_DIR/.env"; rm -f "$envtmp"; fi
-  if [[ ! -f "$INSTALL_DIR/.env" ]]; then
-    cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
-    log "首次安装已生成 $INSTALL_DIR/.env，请先修改密码和 Secret 后重新执行本脚本。"
-    return 10
-  fi
+
   chmod +x "$INSTALL_DIR"/*.sh "$INSTALL_DIR"/scripts/*.sh 2>/dev/null || true
-  log "启动容器并执行数据库 Migration"
-  if ! (cd "$INSTALL_DIR" && docker compose up -d --build); then restore_backup; return 1; fi
-  log "等待服务健康"
-  local ok=0 url; url="$(health_url)"
-  for _ in $(seq 1 60); do
-    if curl -fsS "$url" >/dev/null 2>&1; then ok=1; break; fi
-    sleep 2
-  done
-  if [[ "$ok" != 1 ]]; then restore_backup; die "健康检查失败，已尝试自动回滚"; fi
-  (cd "$INSTALL_DIR" && docker compose exec -T api npm run seed) || true
+
+  source_env
+  local domain="${ZONOE_DOMAIN:-}"
+  if [[ -z "$domain" && -n "${FRONTEND_ORIGIN:-}" ]]; then
+    domain="${FRONTEND_ORIGIN#http://}"; domain="${domain#https://}"; domain="${domain%%/*}"
+  fi
+
+  if ! (cd "$INSTALL_DIR" && bash install.sh "$domain"); then
+    restore_backup
+    die "部署失败，已尝试自动回滚"
+  fi
+
   log "部署完成，版本: $(cat "$INSTALL_DIR/VERSION" 2>/dev/null || echo unknown)"
 }

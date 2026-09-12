@@ -4,14 +4,15 @@
     {"mode":755,"path":"/install.sh"},
     {"mode":755,"path":"/insatll.sh"},
     {"mode":755,"path":"/update.sh"},
-    {"mode":755,"path":"/install-online.sh"}
+    {"mode":755,"path":"/install-online.sh"},
+    {"mode":755,"path":"/install-local.sh"}
   ],
   "success_url":"/",
-  "php_versions":"70,71,72,73,74,80,81,82,83,84",
+  "php_versions":"",
   "db_config":"",
   "admin_username":"",
   "admin_password":"",
-  "run_path":"/",
-  "remove_file":["/index.html","/404.html","/.user.ini"],
+  "run_path":"/public",
+  "remove_file":[],
   "enable_functions":[]
 }

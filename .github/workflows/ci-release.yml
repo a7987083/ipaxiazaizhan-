@@ -5,9 +5,11 @@ on:
     branches:
       - work/zonoe-download-v1
       - feature/baota-oneclick-deploy-v1
+      - feature/baota-native-deploy-v1
     paths:
       - 'VERSION'
       - 'apps/**'
+      - 'public/**'
       - 'deploy/**'
       - 'scripts/**'
       - 'auto_install.json'
@@ -21,6 +23,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.env.example'
+      - '.env.docker.example'
       - 'DEPLOY.md'
       - '.github/workflows/ci-release.yml'
   workflow_dispatch:
@@ -51,12 +54,14 @@ jobs:
           --health-retries 10
     env:
       NODE_ENV: test
+      HOST: 127.0.0.1
+      PORT: 3001
       DATABASE_URL: postgresql://zonoe:zonoe_test_password@127.0.0.1:5432/zonoe_test
       JWT_SECRET: test-jwt-secret-at-least-thirty-two-characters
       IP_HASH_SALT: test-ip-hash-salt-value
       SOURCE_CONFIG_KEY: test-source-config-encryption-key
-      PUBLIC_BASE_URL: http://localhost
-      FRONTEND_ORIGIN: http://localhost:5173
+      PUBLIC_BASE_URL: http://127.0.0.1:18082
+      FRONTEND_ORIGIN: http://127.0.0.1:18082
       LOCAL_STORAGE_DIR: /tmp/zonoe-test-uploads
       COOKIE_SECURE: 'false'
       ADMIN_USERNAME: admin
@@ -75,6 +80,34 @@ jobs:
         run: npm test
       - name: Production build
         run: npm run build
+      - name: Native API smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/api/src/server.js >/tmp/zonoe-api.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3001/healthz >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3001/healthz
+          curl -fsS http://127.0.0.1:3001/api/v1/home >/dev/null
+      - name: Native frontend static smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m http.server 18082 --bind 127.0.0.1 --directory apps/web/dist >/tmp/zonoe-web.log 2>&1 &
+          WEB_PID=$!
+          trap 'kill "$WEB_PID" >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18082/ >/tmp/zonoe-web-index.html 2>/dev/null; then break; fi
+            sleep 1
+          done
+          grep -q 'ZONOE' /tmp/zonoe-web-index.html
+          ASSET="$(grep -oE '/assets/[^"[:space:]]+\.js' /tmp/zonoe-web-index.html | head -n1)"
+          test -n "$ASSET"
+          curl -fsS "http://127.0.0.1:18082${ASSET}" >/dev/null
       - name: Shell validation
         run: |
           bash -n install.sh
@@ -86,38 +119,27 @@ jobs:
           bash -n scripts/lib-deploy.sh
           bash -n scripts/smoke.sh
           bash -n scripts/backup.sh
-      - name: BaoTa one-click contract
-        run: |
-          set -euo pipefail
-          python3 -m json.tool auto_install.json >/dev/null
-          test "$(python3 -c 'import json; print(json.load(open("auto_install.json"))["run_path"])')" = "/"
-          test "$(python3 -c 'import json; print(json.load(open("auto_install.json"))["db_config"])')" = ""
-          grep -Fq 'proxy_pass http://127.0.0.1:18081;' nginx.rewrite
-          grep -Fq 'HTTP_PORT=18081' install.sh
-          grep -Fq 'INSTALL_DIR="$ROOT"' update.sh
-          grep -Fq '${NGINX_HTTP_BIND:-80}:80' docker-compose.yml
-      - name: Compose validation
-        run: |
-          cp .env.example .env
-          sed -i 's/CHANGE_ME_DB_PASSWORD/ci-db-password/g; s/CHANGE_ME_TO_AT_LEAST_32_RANDOM_CHARACTERS/ci-jwt-secret-at-least-32-characters/g; s/CHANGE_ME_TO_RANDOM_SALT/ci-ip-hash-salt/g; s/CHANGE_ME_TO_32_BYTE_SECRET_MATERIAL/ci-source-config-key-32-bytes/g; s/CHANGE_ME_ADMIN_PASSWORD/TestPassword123!/g' .env
-          docker compose config >/dev/null
-      - name: Docker image build
-        run: docker compose build api web
-      - name: Frontend image smoke
+          bash -n scripts/enable-https.sh
+      - name: BaoTa native contract
         shell: bash
         run: |
           set -euo pipefail
-          docker build -f apps/web/Dockerfile -t zonoe-web-smoke-image .
-          docker run -d --rm --name zonoe-web-smoke -p 127.0.0.1:18082:80 zonoe-web-smoke-image
-          trap 'docker rm -f zonoe-web-smoke >/dev/null 2>&1 || true' EXIT
-          for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:18082/ >/tmp/zonoe-web-index.html 2>/dev/null; then break; fi
-            sleep 1
-          done
-          grep -q 'ZONOE' /tmp/zonoe-web-index.html
-          ASSET="$(grep -oE '/assets/[^"[:space:]]+\.js' /tmp/zonoe-web-index.html | head -n1)"
-          test -n "$ASSET"
-          curl -fsS "http://127.0.0.1:18082${ASSET}" >/dev/null
+          python3 -m json.tool auto_install.json >/dev/null
+          test "$(python3 -c 'import json; print(json.load(open("auto_install.json"))["run_path"])')" = "/public"
+          test "$(python3 -c 'import json; print(json.load(open("auto_install.json"))["db_config"])')" = ""
+          grep -Fq 'proxy_pass http://127.0.0.1:3000;' nginx.rewrite
+          grep -Fq 'DEPLOY_MODE native' install.sh
+          grep -Fq 'zonoe-api' install.sh
+          grep -Fq 'systemctl' install.sh
+          ! grep -Fq 'docker compose up' install.sh
+          test -f public/index.html
+      - name: Legacy Docker compose syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .env.docker.example .env
+          sed -i 's/CHANGE_ME_DB_PASSWORD/ci-db-password/g; s/CHANGE_ME_TO_AT_LEAST_32_RANDOM_CHARACTERS/ci-jwt-secret-at-least-32-characters/g; s/CHANGE_ME_TO_RANDOM_SALT/ci-ip-hash-salt/g; s/CHANGE_ME_TO_32_BYTE_SECRET_MATERIAL/ci-source-config-key-32-bytes/g; s/CHANGE_ME_ADMIN_PASSWORD/TestPassword123!/g' .env
+          docker compose config >/dev/null
 
   package-and-release:
     needs: validate
@@ -144,23 +166,26 @@ jobs:
         run: |
           set -euo pipefail
           cd dist-release
+          VERSION="${{ steps.meta.outputs.version }}"
+          NATIVE_ZIP="zonoe-ipa-download-${VERSION}-baota-native.zip"
           sha256sum -c zonoe-ipa-download.tar.gz.sha256
-          sha256sum -c "zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota.zip.sha256"
+          sha256sum -c "${NATIVE_ZIP}.sha256"
           tar -tzf zonoe-ipa-download.tar.gz > package-files.txt
-          grep -Fxq './docker-compose.yml' package-files.txt
           grep -Fxq './install-local.sh' package-files.txt
           grep -Fxq './install-online.sh' package-files.txt
           grep -Fxq './auto_install.json' package-files.txt
           grep -Fxq './install.sh' package-files.txt
           grep -Fxq './nginx.rewrite' package-files.txt
-          ! grep -Fq './.github/workflows/bootstrap-v2.yml' package-files.txt
-          unzip -Z1 "zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota.zip" > baota-files.txt
+          grep -Fxq './public/index.html' package-files.txt
+          unzip -Z1 "$NATIVE_ZIP" > baota-files.txt
           grep -Fxq 'auto_install.json' baota-files.txt
           grep -Fxq 'install.sh' baota-files.txt
           grep -Fxq 'insatll.sh' baota-files.txt
           grep -Fxq 'update.sh' baota-files.txt
           grep -Fxq 'nginx.rewrite' baota-files.txt
-          grep -Fxq 'docker-compose.yml' baota-files.txt
+          grep -Fxq 'public/index.html' baota-files.txt
+          ! grep -Eq '^docker-compose.*\.yml$' baota-files.txt
+          ! grep -Eq '^apps/(api|web)/Dockerfile$' baota-files.txt
           ! grep -Eq '^\.github/' baota-files.txt
       - name: Publish or refresh GitHub Release
         if: github.ref_name == 'work/zonoe-download-v1'
@@ -175,8 +200,8 @@ jobs:
           ASSETS=(
             dist-release/zonoe-ipa-download.tar.gz
             dist-release/zonoe-ipa-download.tar.gz.sha256
-            dist-release/zonoe-ipa-download-${VERSION}-baota.zip
-            dist-release/zonoe-ipa-download-${VERSION}-baota.zip.sha256
+            dist-release/zonoe-ipa-download-${VERSION}-baota-native.zip
+            dist-release/zonoe-ipa-download-${VERSION}-baota-native.zip.sha256
             install-online.sh
             install-local.sh
           )
@@ -184,21 +209,18 @@ jobs:
             gh release upload "$TAG" "${ASSETS[@]}" --clobber
             gh release edit "$TAG" --target "$GITHUB_SHA" --title "$TITLE" --notes-file CHANGELOG.md
           else
-            gh release create "$TAG" "${ASSETS[@]}" \
-              --target "$GITHUB_SHA" \
-              --title "$TITLE" \
-              --notes-file CHANGELOG.md
+            gh release create "$TAG" "${ASSETS[@]}" --target "$GITHUB_SHA" --title "$TITLE" --notes-file CHANGELOG.md
           fi
           gh release view "$TAG" --json tagName,isDraft,isPrerelease,url
       - name: Upload CI deployment packages
         uses: actions/upload-artifact@v4
         with:
-          name: zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota-build
+          name: zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota-native-build
           path: |
             dist-release/zonoe-ipa-download.tar.gz
             dist-release/zonoe-ipa-download.tar.gz.sha256
-            dist-release/zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota.zip
-            dist-release/zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota.zip.sha256
+            dist-release/zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota-native.zip
+            dist-release/zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota-native.zip.sha256
             install-online.sh
             install-local.sh
           if-no-files-found: error
@@ -220,10 +242,8 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/zonoe-release-check
           cd /tmp/zonoe-release-check
-          gh release download "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern 'zonoe-ipa-download*'
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'zonoe-ipa-download*'
           sha256sum -c zonoe-ipa-download.tar.gz.sha256
-          sha256sum -c "zonoe-ipa-download-${VERSION}-baota.zip.sha256"
+          sha256sum -c "zonoe-ipa-download-${VERSION}-baota-native.zip.sha256"
           tar -tzf zonoe-ipa-download.tar.gz >/dev/null
-          unzip -t "zonoe-ipa-download-${VERSION}-baota.zip" >/dev/null
+          unzip -t "zonoe-ipa-download-${VERSION}-baota-native.zip" >/dev/null
