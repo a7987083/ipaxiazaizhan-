@@ -43,25 +43,12 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: zonoe_test
-          POSTGRES_USER: zonoe
-          POSTGRES_PASSWORD: zonoe_test_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U zonoe -d zonoe_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     env:
       NODE_ENV: test
       HOST: 127.0.0.1
       PORT: 3001
-      DATABASE_URL: postgresql://zonoe:zonoe_test_password@127.0.0.1:5432/zonoe_test
+      CONTROL_DIR: /tmp/zonoe-test-control
+      MYSQL_BIN: ${{ github.workspace }}/apps/api/tests/fake-mysql-cli.mjs
       JWT_SECRET: test-jwt-secret-at-least-thirty-two-characters
       IP_HASH_SALT: test-ip-hash-salt-value
       SOURCE_CONFIG_KEY: test-source-config-encryption-key
@@ -148,14 +135,30 @@ jobs:
           grep -Fq 'DEPLOY_MODE native' install.sh
           grep -Fq 'zonoe-api' install.sh
           grep -Fq 'data/install.log' install.sh
-          grep -Fq 'ALTER ROLE :"role" WITH LOGIN PASSWORD :'"'"'dbpass'"'"';' install.sh
-          grep -Fq '# BEGIN ZONOE MANAGED AUTH' install.sh
-          grep -Fq 'SHOW hba_file;' install.sh
+          grep -Fq 'ensure_mysql_client' install.sh
+          grep -Fq 'CONTROL_DIR' install.sh
+          grep -Fq '运行时不依赖 PostgreSQL' install.sh
+          ! grep -Fq 'ensure_postgres' install.sh
+          ! grep -Fq 'pg_hba' install.sh
           grep -Fq -- "--exclude='.user.ini'" install.sh
           grep -Fq -- "--exclude='.well-known/'" install.sh
           ! grep -Fq 'rm -rf "$ROOT/public"' install.sh
           ! grep -Fq 'docker compose up' install.sh
           test -f public/index.html
+      - name: MySQL multi-source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'fa_category' apps/api/src/repositories/appRepository.js
+          grep -Fq 'source_slug' apps/api/src/repositories/appRepository.js
+          grep -Fq 'mysql-sources.json' apps/api/src/storage/controlStore.js
+          grep -Fq 'MYSQL_PWD' apps/api/src/services/mysqlCli.js
+          grep -Fq "r.post('/sources/:id/test'" apps/api/src/routes/admin.js
+          grep -Fq "r.post('/account/password'" apps/api/src/routes/admin.js
+          grep -Fq 'LOGIN_RATE_LIMITED' apps/api/src/middleware/rateLimit.js
+          grep -Fq "['sources','软件源']" apps/web/src/pages/Admin.jsx
+          grep -Fq "['security','密码']" apps/web/src/pages/Admin.jsx
+          ! grep -R "from '../db/pool.js'" apps/api/src --exclude=pool.js
       - name: GitHub updater contract
         shell: bash
         run: |
@@ -190,6 +193,15 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Build current frontend/API for package
+        run: |
+          npm ci
+          npm run build
+          rsync -a --delete apps/web/dist/ public/
       - id: meta
         name: Validate release metadata
         shell: bash
@@ -228,6 +240,8 @@ jobs:
           grep -Fxq 'scripts/admin-update-worker.sh' baota-files.txt
           grep -Fxq 'scripts/install-admin-updater.sh' baota-files.txt
           grep -Fxq 'apps/api/src/services/updateService.js' baota-files.txt
+          grep -Fxq 'apps/api/src/services/mysqlCli.js' baota-files.txt
+          grep -Fxq 'apps/api/src/storage/controlStore.js' baota-files.txt
           grep -Fxq 'insatll.sh' baota-files.txt
           grep -Fxq 'update.sh' baota-files.txt
           grep -Fxq 'install-online.sh' baota-files.txt

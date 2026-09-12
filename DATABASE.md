@@ -1,20 +1,30 @@
-# Database
+# Data Model — 2026091208
 
-完整 DDL：`apps/api/db/migrations/001_init.sql`。
+## 原则
 
-| 表 | 关键字段 / 约束 |
-|---|---|
-| users | email UNIQUE, username UNIQUE |
-| admins | username UNIQUE, Argon/bcrypt hash（当前 bcrypt 12 rounds） |
-| categories | name UNIQUE, slug UNIQUE, enabled/sort_order |
-| apps | bundle_id UNIQUE, slug UNIQUE, category_id FK, current_version_id FK |
-| app_versions | UNIQUE(app_id, version, build), status/release_date/download_count |
-| tags | name/slug UNIQUE |
-| app_tags | PK(app_id, tag_id) |
-| screenshots | app_id/version_id, sort_order |
-| download_sources | type/base_url/encrypted config/priority/health |
-| version_download_sources | version_id/source_id/target/priority, UNIQUE(version_id,source_id,target) |
-| downloads | app/version/source FK, ip_hash, user_agent, referer, created_at |
-| settings | key PK, JSONB value, is_public |
+应用数据只有一份：继续留在原 MySQL 软件源。ZONOE 不创建第二套 apps/app_versions 数据，也不复制 IPA。
 
-重点索引覆盖 published App 列表、分类、更新时间、热门下载、版本历史、source resolution 和下载统计时间范围。
+## 软件源
+
+后台可配置多个 MySQL 数据库。默认读取 `fa_category`，每个源结构相同、内容不同即可。全局键：
+
+```text
+<source_slug>:<fa_category.id>
+```
+
+因此两个数据库同时存在 `id=1` 不会冲突。
+
+## 本地控制数据
+
+`data/control/` 仅保存：
+
+- `admin.json`：bcrypt 管理员密码 hash、session version
+- `settings.json`：公开站点设置
+- `mysql-sources.json`：软件源元数据与 AES-256-GCM 加密连接配置
+- `downloads/*.jsonl`：本地下载审计（不包含明文 IP）
+
+`SOURCE_CONFIG_KEY` 必须稳定保留，否则无法解密已有的软件源密码。
+
+## 外部源写入策略
+
+默认只读。启用某个源的 `writeStats` 后，下载时仅执行 `cs=cs+1` 与 `cstime=UNIX_TIMESTAMP()`；应用名称、版本、URL、IPA 文件都不会被 ZONOE 修改。

@@ -1,66 +1,39 @@
 {
-  "schema_version": 1,
   "repository": "a7987083/ipaxiazaizhan-",
   "branch": "feature/baota-native-deploy-v1",
   "version": "2026091208",
-  "implementation_commit": "d5c2bfe4f1d9ccf92b7f24a97e52cc312da3c9c9",
-  "implementation_summary": "Admin GitHub online update UI backed by a privileged systemd worker, with forward-only web updates",
-  "workflow": ".github/workflows/ci-release.yml",
-  "ci_status": "success",
-  "artifact_policy": "Exact run/artifact IDs and SHA256 are intentionally not embedded in packaged state docs because those docs are themselves part of the package. Use the successful CI artifact for the current branch HEAD as the source of truth.",
-  "phase": "Phase 1.4 BaoTa Native Admin Online Update",
-  "phase_status": "ci_green_pending_real_admin_update_e2e",
+  "phase": "Phase 1.5 Multi-MySQL Source Aggregation",
+  "phase_status": "implementation_pending_ci_after_multi_mysql_cutover",
   "production_verified": false,
-  "last_production_verified_version": "2026091206",
-  "current_blocker": "bootstrap 2026091208 on the real BaoTa host, verify zonoe-updater.path and perform a real admin-button update when a newer Stable release exists",
-  "deployment": {
-    "default_mode": "baota_native",
-    "web_root": "public",
-    "frontend": "baota_nginx_static",
-    "api_process_manager": "systemd",
-    "api_service": "zonoe-api",
-    "api_listen": "127.0.0.1:3000",
-    "database": "local_postgresql",
-    "redis_required": false,
-    "local_files": "public/files -> data/uploads",
-    "preserve_on_update": [".env", "data", "backups"],
-    "docker": "compatibility_only_not_in_native_zip"
+  "runtime": {
+    "web": "BaoTa Nginx serves public/",
+    "api": "Node.js 22 systemd zonoe-api on 127.0.0.1:3000",
+    "application_data": "one or more existing MySQL software-source databases, read directly",
+    "application_table": "fa_category compatible",
+    "control_plane": "data/control JSON files; encrypted source credentials; no PostgreSQL runtime dependency",
+    "ipa_storage": "original URLs from fa_category.bt1a; no duplicate upload"
   },
-  "admin_online_update": {
-    "implemented": true,
-    "ui": "Admin sidebar -> 在线更新",
-    "check_endpoint": "GET /api/v1/admin/system/update",
-    "trigger_endpoint": "POST /api/v1/admin/system/update",
-    "auth": "admin JWT cookie + CSRF for POST",
-    "api_runs_as_root": false,
-    "privileged_execution": "zonoe-updater.path -> zonoe-updater.service -> scripts/admin-update-worker.sh",
-    "request_file": "data/update-runtime/admin-update-request.json",
-    "status_file": "data/update-runtime/admin-update-status.json",
-    "worker_log": "data/update-runtime/admin-update.log",
-    "update_engine": "update.sh / install-online.sh / scripts/lib-deploy.sh",
-    "web_update_policy": "forward_only_no_downgrade",
-    "backup_and_rollback": true,
-    "release_source": "GitHub Stable Release by default"
+  "features": {
+    "multi_mysql_sources": true,
+    "composite_app_identity": "source_slug:legacy_id",
+    "github_admin_update": true,
+    "admin_password_change": true,
+    "json_login_rate_limit": true,
+    "duplicate_ipa_upload_disabled": true,
+    "postgres_runtime_required": false
   },
   "verification": {
-    "integration_tests": "passed_ci",
-    "production_build": "passed_ci",
-    "native_api_smoke": "passed_ci",
-    "native_frontend_static_smoke": "passed_ci",
-    "shell_validation": "passed_ci",
-    "baota_native_contract": "passed_ci",
-    "github_updater_contract": "passed_ci",
-    "package_validation": "passed_ci",
-    "admin_update_ui_build": "passed_ci",
-    "real_baota_runtime_last_verified": "2026091206",
-    "real_admin_update_button_e2e": "pending",
-    "real_clean_fresh_install_1208": "pending",
-    "real_docker_to_native_migration": "pending"
+    "local_shell_syntax": "passed",
+    "local_node_syntax": "passed",
+    "workflow_yaml_parse": "passed",
+    "ci_for_current_head": "pending",
+    "real_baota_multi_mysql_e2e": "pending",
+    "real_admin_update_button_e2e": "pending"
   },
-  "public_release": {
-    "status": "not_published_for_2026091208",
-    "note": "Feature branch artifacts are CI builds; Stable remains intentionally unchanged until real admin-update E2E is verified."
-  },
-  "next_task": "Bootstrap 2026091208 once on ios.zonoeios.xyz, confirm zonoe-updater.path is active and the Admin 在线更新 page works. Then publish a newer Stable candidate and verify one complete button-triggered update/backup/restart/status cycle before declaring 1208 production-verified.",
-  "state_docs": ["ROADMAP.md", "CHANGELOG_DEV.md", "HANDOFF.md", "PROJECT_STATE.json", "KNOWN_ISSUES.md"]
+  "notes": [
+    "1207 production/runtime baseline remains the last real BaoTa verification.",
+    "Existing PostgreSQL settings may remain in .env only for rollback compatibility; 1208 runtime code does not connect to PostgreSQL.",
+    "Installer never auto-stops or uninstalls a system PostgreSQL service because other sites may depend on it.",
+    "External MySQL software-source databases are not modified by updates. Download counter write-back is opt-in per source."
+  ]
 }

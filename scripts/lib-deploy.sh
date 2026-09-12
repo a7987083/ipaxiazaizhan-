@@ -8,7 +8,7 @@ need(){ command -v "$1" >/dev/null 2>&1 || die "缺少命令: $1"; }
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/zonoe-ipa-download}"
 BACKUP_ROOT="${BACKUP_ROOT:-$INSTALL_DIR/backups}"
-export PATH="/www/server/pgsql/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+export PATH="/www/server/mysql/bin:/usr/local/mysql/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 safe_extract(){
   local pkg="$1" dst="$2"
@@ -78,18 +78,17 @@ backup_current(){
   if [[ -d "$INSTALL_DIR/public" ]]; then
     tar --exclude='./files' -C "$INSTALL_DIR/public" -czf "$CURRENT_BACKUP/public.tar.gz" . || true
   fi
+  # 1208+ does not copy application rows or IPA files into a second database.
+  # Only the small local control plane (admin hash, settings, encrypted MySQL
+  # source definitions, local download audit) needs a point-in-time backup.
+  if [[ -d "$INSTALL_DIR/data/control" ]]; then
+    tar -C "$INSTALL_DIR/data" -czf "$CURRENT_BACKUP/control.tar.gz" control || true
+  fi
 
   if command -v docker >/dev/null 2>&1 && [[ -f "$INSTALL_DIR/docker-compose.yml" ]] && (cd "$INSTALL_DIR" && docker compose ps --status running --services 2>/dev/null | grep -qx postgres); then
-    log "备份旧 Docker PostgreSQL"
-    (cd "$INSTALL_DIR" && docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$CURRENT_BACKUP/database.sql") || true
     CURRENT_MODE="docker"
   else
     CURRENT_MODE="native"
-    source_env
-    if command -v pg_dump >/dev/null 2>&1 && [[ -n "${DATABASE_URL:-}" ]]; then
-      log "备份本机 PostgreSQL"
-      pg_dump "$DATABASE_URL" > "$CURRENT_BACKUP/database.sql" || true
-    fi
   fi
 }
 
@@ -144,7 +143,7 @@ restore_backup(){
   systemctl restart zonoe-api >/dev/null 2>&1 || true
 
   if ! curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1; then
-    warn "程序已回滚，但 API 未恢复；数据库备份位于 $b/database.sql（如存在）"
+    warn "程序已回滚，但 API 未恢复；控制数据备份位于 $b/control.tar.gz（如存在）"
   fi
 }
 

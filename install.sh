@@ -9,335 +9,118 @@ need(){ command -v "$1" >/dev/null 2>&1 || die "缺少命令: $1"; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$ROOT/data"
 LOG_FILE="$ROOT/data/install.log"
-touch "$LOG_FILE"
-chmod 600 "$LOG_FILE" || true
+touch "$LOG_FILE"; chmod 600 "$LOG_FILE" || true
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-DOMAIN="${1:-}"
-DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"
-[[ -n "$DOMAIN" ]] || DOMAIN="localhost"
-SERVICE_NAME="zonoe-api"
-RUNTIME_USER="zonoe"
-export PATH="/www/server/pgsql/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
-
+DOMAIN="${1:-}"; DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"; [[ -n "$DOMAIN" ]] || DOMAIN="localhost"
+SERVICE_NAME="zonoe-api"; RUNTIME_USER="zonoe"
+export PATH="/www/server/mysql/bin:/usr/local/mysql/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 [[ "$(id -u)" -eq 0 ]] || die "宝塔原生部署需要 root 权限执行 install.sh"
 
 pkg_install(){
-  if command -v apt-get >/dev/null 2>&1; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -y
-    apt-get install -y "$@"
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y "$@"
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y "$@"
-  else
-    die "无法识别系统包管理器，请先安装 curl、python3、rsync、PostgreSQL 客户端/服务端和 Node.js 22"
-  fi
+  if command -v apt-get >/dev/null 2>&1; then export DEBIAN_FRONTEND=noninteractive; apt-get update -y; apt-get install -y "$@";
+  elif command -v dnf >/dev/null 2>&1; then dnf install -y "$@";
+  elif command -v yum >/dev/null 2>&1; then yum install -y "$@";
+  else die "无法识别系统包管理器"; fi
 }
 
 ensure_base_tools(){
-  local missing=()
-  command -v curl >/dev/null 2>&1 || missing+=(curl)
-  command -v python3 >/dev/null 2>&1 || missing+=(python3)
-  command -v rsync >/dev/null 2>&1 || missing+=(rsync)
-  command -v openssl >/dev/null 2>&1 || missing+=(openssl)
-  if ((${#missing[@]})); then pkg_install "${missing[@]}"; fi
+  local missing=(); command -v curl >/dev/null 2>&1||missing+=(curl); command -v python3 >/dev/null 2>&1||missing+=(python3); command -v rsync >/dev/null 2>&1||missing+=(rsync); command -v openssl >/dev/null 2>&1||missing+=(openssl)
+  ((${#missing[@]}))&&pkg_install "${missing[@]}"||true
 }
 
 ensure_node(){
-  local major=0
-  if command -v node >/dev/null 2>&1; then
-    major="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)"
-  fi
-  if [[ "$major" -ge 22 ]] && command -v npm >/dev/null 2>&1; then return 0; fi
-  need curl
-  log "安装 Node.js 22"
-  if command -v apt-get >/dev/null 2>&1; then
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-    apt-get install -y nodejs
-  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
-    curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
-    if command -v dnf >/dev/null 2>&1; then dnf install -y nodejs; else yum install -y nodejs; fi
-  else
-    die "无法自动安装 Node.js 22"
-  fi
-  node -e 'if(Number(process.versions.node.split(".")[0])<22) process.exit(1)' || die "Node.js 22 安装失败"
+  local major=0; command -v node >/dev/null 2>&1&&major="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null||echo 0)"
+  if [[ "$major" -ge 22 ]]&&command -v npm >/dev/null 2>&1; then return; fi
+  log "安装 Node.js 22"; need curl
+  if command -v apt-get >/dev/null 2>&1; then curl -fsSL https://deb.nodesource.com/setup_22.x|bash -; apt-get install -y nodejs;
+  elif command -v dnf >/dev/null 2>&1||command -v yum >/dev/null 2>&1; then curl -fsSL https://rpm.nodesource.com/setup_22.x|bash -; command -v dnf >/dev/null 2>&1&&dnf install -y nodejs||yum install -y nodejs;
+  else die "无法自动安装 Node.js 22"; fi
 }
 
-ensure_postgres(){
-  if ! command -v psql >/dev/null 2>&1 || ! command -v pg_dump >/dev/null 2>&1; then
-    log "安装 PostgreSQL"
-    if command -v apt-get >/dev/null 2>&1; then
-      pkg_install postgresql postgresql-client
-    elif command -v dnf >/dev/null 2>&1; then
-      pkg_install postgresql-server postgresql
-    elif command -v yum >/dev/null 2>&1; then
-      pkg_install postgresql-server postgresql
-    fi
-  fi
-
-  if command -v pg_isready >/dev/null 2>&1 && pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then return 0; fi
-
-  if command -v postgresql-setup >/dev/null 2>&1 && [[ ! -s /var/lib/pgsql/data/PG_VERSION ]]; then
-    postgresql-setup --initdb >/dev/null
-  fi
-  systemctl enable --now postgresql >/dev/null 2>&1 || true
-
-  for unit in postgresql.service postgresql-16.service postgresql-15.service postgresql-14.service; do
-    systemctl enable --now "$unit" >/dev/null 2>&1 || true
-    if command -v pg_isready >/dev/null 2>&1 && pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then return 0; fi
+MYSQL_BIN_FOUND=""
+ensure_mysql_client(){
+  local p
+  for p in /www/server/mysql/bin/mysql /usr/local/mysql/bin/mysql "$(command -v mysql 2>/dev/null||true)"; do
+    [[ -n "$p"&&-x "$p" ]]&&MYSQL_BIN_FOUND="$p"&&break
   done
-
-  for _ in $(seq 1 30); do
-    if command -v pg_isready >/dev/null 2>&1 && pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then return 0; fi
-    sleep 1
-  done
-  die "PostgreSQL 未能在 127.0.0.1:5432 启动"
+  if [[ -z "$MYSQL_BIN_FOUND" ]]; then
+    log "安装 MySQL 客户端（仅客户端，不安装第二套数据库服务）"
+    if command -v apt-get >/dev/null 2>&1; then pkg_install default-mysql-client;
+    elif command -v dnf >/dev/null 2>&1; then pkg_install mariadb;
+    elif command -v yum >/dev/null 2>&1; then pkg_install mariadb; fi
+    MYSQL_BIN_FOUND="$(command -v mysql 2>/dev/null||true)"
+  fi
+  [[ -n "$MYSQL_BIN_FOUND" ]]||die "未找到 mysql 客户端。宝塔 MySQL 常见路径：/www/server/mysql/bin/mysql"
+  log "MySQL 客户端: $MYSQL_BIN_FOUND"
 }
 
 random_hex(){ openssl rand -hex "${1:-24}"; }
-
-set_env(){
-  local key="$1" value="$2"
-  python3 - "$ROOT/.env" "$key" "$value" <<'PY'
+set_env(){ local key="$1" value="$2"; python3 - "$ROOT/.env" "$key" "$value" <<'PY'
 import pathlib,sys
-p=pathlib.Path(sys.argv[1]); key=sys.argv[2]; value=sys.argv[3]
-lines=p.read_text(encoding='utf-8').splitlines() if p.exists() else []
-out=[]; found=False
+p=pathlib.Path(sys.argv[1]); k=sys.argv[2]; v=sys.argv[3]; lines=p.read_text(encoding='utf-8').splitlines() if p.exists() else []; out=[]; found=False
 for line in lines:
-    if line.startswith(key+'='):
-        out.append(f'{key}={value}'); found=True
-    else:
-        out.append(line)
-if not found: out.append(f'{key}={value}')
+    if line.startswith(k+'='): out.append(f'{k}={v}'); found=True
+    else: out.append(line)
+if not found: out.append(f'{k}={v}')
 p.write_text('\n'.join(out).rstrip()+'\n',encoding='utf-8')
 PY
 }
-
-load_env(){
-  if [[ -f "$ROOT/.env" ]]; then
-    set +u
-    set -a
-    source "$ROOT/.env"
-    set +a
-    set -u
-  fi
-}
-
-docker_migration_backup(){
-  MIGRATION_DUMP=""
-  if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1 || [[ ! -f "$ROOT/docker-compose.yml" ]]; then return 0; fi
-  if ! (cd "$ROOT" && docker compose ps --status running --services 2>/dev/null | grep -qx postgres); then return 0; fi
-  local dir="$ROOT/backups/native-migration-$(date +%Y%m%d_%H%M%S)"
-  mkdir -p "$dir"
-  log "检测到旧 Docker 部署，先导出 PostgreSQL 数据"
-  (cd "$ROOT" && docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$dir/database.sql")
-  [[ -f "$ROOT/.env" ]] && cp "$ROOT/.env" "$dir/.env"
-  MIGRATION_DUMP="$dir/database.sql"
-  log "停止旧 Docker 服务（保留 volume，不删除数据）"
-  (cd "$ROOT" && docker compose down) || warn "旧 Docker 服务停止失败，请稍后手动检查"
-}
+load_env(){ if [[ -f "$ROOT/.env" ]]; then set +u; set -a; source "$ROOT/.env"; set +a; set -u; fi; }
 
 prepare_env(){
-  mkdir -p "$ROOT/data/uploads" "$ROOT/data/update-runtime" "$ROOT/backups"
-  chmod 700 "$ROOT/data/update-runtime"
-
+  mkdir -p "$ROOT/data/control" "$ROOT/data/update-runtime" "$ROOT/backups" "$ROOT/public"; chmod 700 "$ROOT/data/update-runtime"||true
   load_env
-  local db_password="${POSTGRES_PASSWORD:-}"
-  [[ -n "$db_password" && "$db_password" != "CHANGE_ME_DB_PASSWORD" ]] || db_password="$(random_hex 20)"
-  local jwt="${JWT_SECRET:-}"
-  [[ ${#jwt} -ge 32 && "$jwt" != CHANGE_ME* ]] || jwt="$(random_hex 32)"
-  local salt="${IP_HASH_SALT:-}"
-  [[ ${#salt} -ge 8 && "$salt" != CHANGE_ME* ]] || salt="$(random_hex 24)"
-  local source_key="${SOURCE_CONFIG_KEY:-}"
-  [[ ${#source_key} -ge 16 && "$source_key" != CHANGE_ME* ]] || source_key="$(random_hex 32)"
-  local admin_password="${ADMIN_PASSWORD:-}"
-  [[ -n "$admin_password" && "$admin_password" != "CHANGE_ME_ADMIN_PASSWORD" ]] || admin_password="Zonoe-$(random_hex 8)"
+  local jwt="${JWT_SECRET:-}"; [[ ${#jwt} -ge 32&&"$jwt" != CHANGE_ME* ]]||jwt="$(random_hex 32)"
+  local salt="${IP_HASH_SALT:-}"; [[ ${#salt} -ge 8&&"$salt" != CHANGE_ME* ]]||salt="$(random_hex 24)"
+  local source_key="${SOURCE_CONFIG_KEY:-}"; [[ ${#source_key} -ge 16&&"$source_key" != CHANGE_ME* ]]||source_key="$(random_hex 32)"
+  local admin_password="${ADMIN_PASSWORD:-}"; if [[ ! -f "$ROOT/data/control/admin.json" ]]; then [[ -n "$admin_password"&&"$admin_password" != CHANGE_ME* ]]||admin_password="Zonoe-$(random_hex 8)"; fi
 
   touch "$ROOT/.env"
-  set_env NODE_ENV production
-  set_env HOST 127.0.0.1
-  set_env PORT 3000
-  set_env PUBLIC_BASE_URL "${PUBLIC_BASE_URL:-http://$DOMAIN}"
-  set_env FRONTEND_ORIGIN "${FRONTEND_ORIGIN:-http://$DOMAIN}"
-  set_env POSTGRES_DB "${POSTGRES_DB:-zonoe}"
-  set_env POSTGRES_USER "${POSTGRES_USER:-zonoe}"
-  set_env POSTGRES_PASSWORD "$db_password"
-  local db_password_url
-  db_password_url="$(python3 - "$db_password" <<'PY'
-import sys,urllib.parse
-print(urllib.parse.quote(sys.argv[1],safe=''))
-PY
-)"
-  set_env DATABASE_URL "postgresql://${POSTGRES_USER:-zonoe}:${db_password_url}@127.0.0.1:5432/${POSTGRES_DB:-zonoe}"
-  if [[ "${REDIS_URL:-}" == redis://redis:* ]]; then set_env REDIS_URL ""; else set_env REDIS_URL "${REDIS_URL:-}"; fi
-  set_env JWT_SECRET "$jwt"
-  set_env IP_HASH_SALT "$salt"
-  set_env SOURCE_CONFIG_KEY "$source_key"
-  set_env COOKIE_SECURE "${COOKIE_SECURE:-false}"
-  set_env ADMIN_USERNAME "${ADMIN_USERNAME:-admin}"
-  set_env ADMIN_PASSWORD "$admin_password"
-  set_env ADMIN_EMAIL "${ADMIN_EMAIL:-admin@$DOMAIN}"
-  set_env LOCAL_STORAGE_DIR "$ROOT/data/uploads"
-  set_env MAX_UPLOAD_MB "${MAX_UPLOAD_MB:-4096}"
-  set_env DOWNLOAD_RATE_LIMIT "${DOWNLOAD_RATE_LIMIT:-120}"
-  set_env GITHUB_REPOSITORY "${GITHUB_REPOSITORY:-a7987083/ipaxiazaizhan-}"
-  set_env GITHUB_RELEASE_CHANNEL "${GITHUB_RELEASE_CHANNEL:-stable}"
-  set_env INSTALL_DIR "$ROOT"
-  set_env UPDATE_RUNTIME_DIR "$ROOT/data/update-runtime"
-  set_env VERSION_FILE "$ROOT/VERSION"
-  set_env DEPLOY_MODE native
-
-  chmod 640 "$ROOT/.env"
-  load_env
+  set_env NODE_ENV production; set_env HOST 127.0.0.1; set_env PORT 3000
+  set_env PUBLIC_BASE_URL "${PUBLIC_BASE_URL:-http://$DOMAIN}"; set_env FRONTEND_ORIGIN "${FRONTEND_ORIGIN:-http://$DOMAIN}"
+  set_env JWT_SECRET "$jwt"; set_env IP_HASH_SALT "$salt"; set_env SOURCE_CONFIG_KEY "$source_key"; set_env COOKIE_SECURE "${COOKIE_SECURE:-false}"
+  set_env ADMIN_USERNAME "${ADMIN_USERNAME:-admin}"; [[ -n "$admin_password" ]]&&set_env ADMIN_PASSWORD "$admin_password"; set_env ADMIN_EMAIL "${ADMIN_EMAIL:-admin@$DOMAIN}"
+  set_env CONTROL_DIR "$ROOT/data/control"; set_env MYSQL_BIN "$MYSQL_BIN_FOUND"; set_env DOWNLOAD_RATE_LIMIT "${DOWNLOAD_RATE_LIMIT:-120}"
+  set_env GITHUB_REPOSITORY "${GITHUB_REPOSITORY:-a7987083/ipaxiazaizhan-}"; set_env GITHUB_RELEASE_CHANNEL "${GITHUB_RELEASE_CHANNEL:-stable}"
+  set_env INSTALL_DIR "$ROOT"; set_env UPDATE_RUNTIME_DIR "$ROOT/data/update-runtime"; set_env VERSION_FILE "$ROOT/VERSION"; set_env DEPLOY_MODE native
+  chmod 640 "$ROOT/.env"; load_env
 
   if [[ ! -f "$ROOT/data/install-info.txt" ]]; then
     cat > "$ROOT/data/install-info.txt" <<INFO
 ZONOE IPA Download
-Deploy Mode: native
+Deploy Mode: native + existing MySQL software sources
 Domain: $DOMAIN
 Admin URL: http://$DOMAIN/admin
 Username: ${ADMIN_USERNAME:-admin}
-Password: $admin_password
+Bootstrap Password: ${admin_password:-已存在，请使用后台当前密码}
 Generated: $(date -Iseconds)
 
-启用 HTTPS 后请执行：
-  bash scripts/enable-https.sh $DOMAIN
-
-在线更新：
-  bash update.sh
+提示：后台修改密码后，以后台新密码为准；.env 中 ADMIN_PASSWORD 仅用于首次初始化。
 INFO
     chmod 600 "$ROOT/data/install-info.txt"
   fi
 }
 
-database_password_test(){
-  PGPASSWORD="${POSTGRES_PASSWORD}" PGCONNECT_TIMEOUT=5 \
-    psql -h 127.0.0.1 -p 5432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc 'SELECT 1' >/dev/null 2>&1
-}
-
-ensure_postgres_password_auth(){
-  if database_password_test; then return 0; fi
-
-  local hba backup
-  hba="$(runuser -u postgres -- psql -d postgres -Atqc 'SHOW hba_file;' 2>/dev/null | tail -n1 | tr -d '\r')"
-  [[ -n "$hba" && -f "$hba" ]] || die "数据库密码认证失败，且无法定位 pg_hba.conf"
-
-  backup="$ROOT/backups/pg_hba.conf.$(date +%Y%m%d_%H%M%S).bak"
-  cp -a "$hba" "$backup"
-  log "检测到 PostgreSQL 本机密码认证不兼容，自动写入 ZONOE 专用 pg_hba 规则"
-  log "pg_hba.conf 已备份: $backup"
-
-  python3 - "$hba" "$POSTGRES_DB" "$POSTGRES_USER" <<'PY'
-from pathlib import Path
-import sys
-p=Path(sys.argv[1]); db=sys.argv[2]; user=sys.argv[3]
-begin="# BEGIN ZONOE MANAGED AUTH"
-end="# END ZONOE MANAGED AUTH"
-lines=p.read_text(encoding="utf-8").splitlines()
-out=[]; skip=False
-for line in lines:
-    if line.strip()==begin:
-        skip=True
-        continue
-    if skip and line.strip()==end:
-        skip=False
-        continue
-    if not skip:
-        out.append(line)
-block=[
-    begin,
-    f"host    {db}    {user}    127.0.0.1/32    md5",
-    f"host    {db}    {user}    ::1/128         md5",
-    end,
-    "",
-]
-p.write_text("\n".join(block+out).rstrip()+"\n", encoding="utf-8")
-PY
-
-  runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -Atqc 'SELECT pg_reload_conf();' >/dev/null
-  for _ in $(seq 1 10); do
-    if database_password_test; then
-      log "PostgreSQL localhost 密码认证已自动修复"
-      return 0
-    fi
-    sleep 1
-  done
-  die "已更新 pg_hba.conf 但密码连接仍失败。备份文件: $backup"
-}
-
-prepare_database(){
-  need runuser
-  [[ "${POSTGRES_DB:-}" =~ ^[A-Za-z0-9_]+$ ]] || die "POSTGRES_DB 只能包含字母、数字和下划线"
-  [[ "${POSTGRES_USER:-}" =~ ^[A-Za-z0-9_]+$ ]] || die "POSTGRES_USER 只能包含字母、数字和下划线"
-
-  runuser -u postgres -- psql -d postgres -tAc 'SELECT 1' >/dev/null || die "无法通过 postgres 系统用户管理本机 PostgreSQL"
-
-  if ! runuser -u postgres -- psql -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${POSTGRES_USER}'" | grep -q 1; then
-    runuser -u postgres -- createuser "$POSTGRES_USER"
-  fi
-  runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -v role="$POSTGRES_USER" -v dbpass="$POSTGRES_PASSWORD" >/dev/null <<'SQL'
-ALTER ROLE :"role" WITH LOGIN PASSWORD :'dbpass';
-SQL
-
-  if ! runuser -u postgres -- psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'" | grep -q 1; then
-    runuser -u postgres -- createdb -O "$POSTGRES_USER" "$POSTGRES_DB"
-  fi
-
-  ensure_postgres_password_auth
-
-  if [[ -n "${MIGRATION_DUMP:-}" && -s "$MIGRATION_DUMP" ]]; then
-    local has_users
-    has_users="$(psql "$DATABASE_URL" -tAc "SELECT to_regclass('public.users') IS NOT NULL" | tr -d '[:space:]')"
-    if [[ "$has_users" != "t" ]]; then
-      log "恢复旧 Docker PostgreSQL 数据到本机 PostgreSQL"
-      psql "$DATABASE_URL" -v ON_ERROR_STOP=1 < "$MIGRATION_DUMP" >/dev/null
-    else
-      warn "本机数据库已有表，跳过 Docker 数据恢复；备份保留在 $MIGRATION_DUMP"
-    fi
-  fi
-}
-
 build_application(){
-  log "安装 Node 依赖（root package-lock + npm ci）"
-  (cd "$ROOT" && npm ci)
-  log "执行 API 语法检查与 React Production Build"
-  (cd "$ROOT" && npm run build)
-
-  [[ -f "$ROOT/apps/web/dist/index.html" ]] || die "前端构建产物缺少 index.html"
+  log "安装 Node 依赖（root package-lock + npm ci）"; (cd "$ROOT"&&npm ci)
+  log "执行 API 语法检查与 React Production Build"; (cd "$ROOT"&&npm run build)
+  [[ -f "$ROOT/apps/web/dist/index.html" ]]||die "前端构建产物缺少 index.html"
   mkdir -p "$ROOT/public"
-
-  # BaoTa may protect public/.user.ini with the immutable bit. Never delete the
-  # whole public directory; replace only application build output.
-  rsync -a --delete \
-    --exclude='.user.ini' \
-    --exclude='.well-known/' \
-    --exclude='files' \
-    "$ROOT/apps/web/dist/" "$ROOT/public/"
-
-  if [[ -L "$ROOT/public/files" || -e "$ROOT/public/files" ]]; then
-    rm -rf "$ROOT/public/files"
-  fi
-  ln -s "$ROOT/data/uploads" "$ROOT/public/files"
+  rsync -a --delete --exclude='.user.ini' --exclude='.well-known/' --exclude='files' "$ROOT/apps/web/dist/" "$ROOT/public/"
 }
 
 ensure_runtime_user(){
-  if ! id "$RUNTIME_USER" >/dev/null 2>&1; then
-    useradd --system --home-dir "$ROOT" --shell /usr/sbin/nologin "$RUNTIME_USER"
-  fi
-  chown -R "$RUNTIME_USER:$RUNTIME_USER" "$ROOT/data"
-  chown root:"$RUNTIME_USER" "$ROOT/.env"
-  chmod 640 "$ROOT/.env"
+  id "$RUNTIME_USER" >/dev/null 2>&1||useradd --system --home-dir "$ROOT" --shell /usr/sbin/nologin "$RUNTIME_USER"
+  chown -R "$RUNTIME_USER:$RUNTIME_USER" "$ROOT/data"; chown root:"$RUNTIME_USER" "$ROOT/.env"; chmod 640 "$ROOT/.env"
 }
 
 write_systemd_service(){
-  local node_bin
-  node_bin="$(command -v node)"
+  local node_bin="$(command -v node)"
   cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<UNIT
 [Unit]
 Description=ZONOE IPA Download API
-After=network-online.target postgresql.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -363,46 +146,20 @@ UNIT
 }
 
 start_application(){
-  log "执行数据库 Migration / Seed"
-  (cd "$ROOT" && node apps/api/src/db/migrate.js)
-  (cd "$ROOT" && node apps/api/src/db/seed.js)
-
-  systemctl enable --now "$SERVICE_NAME"
-  systemctl restart "$SERVICE_NAME"
-
-  local ok=0
-  for _ in $(seq 1 40); do
-    if curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1; then ok=1; break; fi
-    sleep 1
-  done
-  if [[ "$ok" != 1 ]]; then
-    journalctl -u "$SERVICE_NAME" -n 80 --no-pager || true
-    die "API 健康检查失败"
-  fi
-
-  local asset
-  asset="$(grep -oE '/assets/[^"[:space:]]+\.js' "$ROOT/public/index.html" | head -n1 || true)"
-  [[ -n "$asset" && -f "$ROOT/public$asset" ]] || die "前端静态资源构建检查失败"
+  log "初始化本地控制数据（管理员/设置/软件源配置）"; (cd "$ROOT"&&node apps/api/src/db/migrate.js); (cd "$ROOT"&&node apps/api/src/db/seed.js)
+  systemctl enable --now "$SERVICE_NAME"; systemctl restart "$SERVICE_NAME"
+  local ok=0; for _ in $(seq 1 40); do curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1&&ok=1&&break; sleep 1; done
+  if [[ "$ok" != 1 ]]; then journalctl -u "$SERVICE_NAME" -n 80 --no-pager||true; die "API 健康检查失败"; fi
+  local asset="$(grep -oE '/assets/[^"[:space:]]+\.js' "$ROOT/public/index.html"|head -n1||true)"; [[ -n "$asset"&&-f "$ROOT/public$asset" ]]||die "前端静态资源构建检查失败"
 }
 
 main(){
-  ensure_base_tools
-  ensure_node
-  docker_migration_backup
-  ensure_postgres
-  prepare_env
-  prepare_database
-  build_application
-  ensure_runtime_user
-  write_systemd_service
-  start_application
+  ensure_base_tools; ensure_node; ensure_mysql_client; prepare_env; build_application; ensure_runtime_user; write_systemd_service; start_application
   touch "$ROOT/.zonoe-native-installed"
-  log "宝塔原生部署完成（无 Docker）。"
-  log "版本: $(tr -d '\r\n ' < "$ROOT/VERSION" 2>/dev/null || echo unknown)"
-  log "站点目录: $ROOT/public"
-  log "API: http://127.0.0.1:3000"
-  log "安装日志: $LOG_FILE"
-  log "在线更新: cd $ROOT && bash update.sh"
+  log "宝塔原生部署完成（无 Docker；运行时不依赖 PostgreSQL）。"
+  log "版本: $(tr -d '\r\n ' < "$ROOT/VERSION" 2>/dev/null||echo unknown)"
+  log "应用数据: 后台添加一个或多个现有 MySQL 软件源；IPA 使用原地址，不复制。"
+  log "站点目录: $ROOT/public"; log "API: http://127.0.0.1:3000"; log "安装日志: $LOG_FILE"; log "在线更新: 后台 → 在线更新，或 cd $ROOT && bash update.sh"
+  if grep -q '^DATABASE_URL=postgres' "$ROOT/.env" 2>/dev/null; then warn "检测到旧 PostgreSQL 配置，仅保留以便回滚；1208 新运行时不会连接它。不要自动卸载系统 PostgreSQL，以免影响其他站点。"; fi
 }
-
 main "$@"

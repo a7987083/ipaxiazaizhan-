@@ -1,17 +1,6 @@
-import pg from 'pg';
-import { env } from '../config/env.js';
-const { Pool } = pg;
-export const pool = new Pool({ connectionString: env.DATABASE_URL, max: 20, idleTimeoutMillis: 30000 });
-export const query = (text, params=[]) => pool.query(text, params);
-export async function tx(fn) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (e) {
-    await client.query('ROLLBACK');
-    throw e;
-  } finally { client.release(); }
-}
+// 2026091208+: runtime data no longer depends on PostgreSQL.
+// Application records are read directly from configured MySQL software sources,
+// while the small ZONOE control plane is stored under data/control.
+export const pool={query(){throw new Error('PostgreSQL pool is no longer used')},end:async()=>{}};
+export const query=()=>{throw new Error('PostgreSQL query is no longer used')};
+export const tx=()=>{throw new Error('PostgreSQL transaction is no longer used')};

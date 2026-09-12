@@ -1,40 +1,20 @@
-# CHANGELOG_DEV
+# Development Changelog
 
-> 仅记录开发过程中实际发生的变更。面向开发/接手，不替代正式 Release Changelog。
+## 2026-09-13 — 2026091208 Multi-MySQL software sources + admin operations
 
-## 2026-09-13 — 2026091208 后台 GitHub 在线更新
+- 后台保留并完善 GitHub「在线更新」：检查版本、一键更新、状态轮询，root systemd worker 继续与 Web API 隔离。
+- 应用数据改为直接聚合一个或多个现有 MySQL 软件源，不再在 ZONOE 内复制一套 App/版本/IPA 数据。
+- 原 FastAdmin `fa_category` 结构原生适配：`name`、`nickname`、`image`、`keywords/description`、`weigh`、`bt1a`、`bt2a`、`cs`。
+- 多库允许相同原始 ID，ZONOE 使用 `source_slug:legacy_id` 作为全局身份。
+- 后台新增 MySQL 软件源：新增、编辑、启停、优先级、测试连接；凭据使用既有 `SOURCE_CONFIG_KEY` 加密落盘。
+- IPA 下载继续 302 到原 `bt1a` 地址；不上传第二份文件。旧 `/admin/upload` 明确禁用。
+- ZONOE 运行时去除 PostgreSQL 依赖；管理员、站点设置、加密源配置放在 `data/control`，更新时一起备份。
+- 后台新增「修改密码」：验证当前密码、bcrypt 保存、session version 增量、修改成功强制重新登录；`.env` 密码仅首次初始化使用。
+- 登录/API/下载限流统一返回项目 JSON 错误，前端不再把 429 显示成“响应解析失败”。
+- CI 增加双 MySQL 软件源模拟测试，覆盖重复 ID、跨源搜索、源筛选、原地址下载、密码修改与 429 JSON。
 
-- 参考旧项目 `a7987083/app-` 的后台在线更新交互：后台检查版本、确认更新、显示更新中并在完成后刷新状态。
-- 当前 ZONOE 后台新增“在线更新”入口。
-- 新增 `GET /api/v1/admin/system/update`：返回当前版本、GitHub 最新 Stable、Release 说明和任务状态。
-- 新增 `POST /api/v1/admin/system/update`：管理员提交更新任务；继续使用既有 Admin JWT + CSRF 保护。
-- 新增 `apps/api/src/services/updateService.js`，负责 GitHub Release 检查和固定格式任务队列，不执行任意 shell。
-- 新增 `scripts/admin-update-worker.sh`。
-- 新增 `scripts/install-admin-updater.sh`，安装 `zonoe-updater.path` + `zonoe-updater.service`。
-- API 仍以 `zonoe` 用户运行；真正需要 root 的更新由独立 systemd oneshot worker 完成。
-- worker 复用 1207 的 `update.sh` / `install-online.sh` / `scripts/lib-deploy.sh`，因此继续拥有 SHA256 校验、数据库/程序/前端备份和失败回滚。
-- 后台更新被限制为 forward-only：本地开发/预览版高于公开 Stable 时只显示状态，不允许通过 Web 强制降级。
-- `VERSION`：`2026091207` -> `2026091208`。
-- Initial admin updater commit：`09d47d6d1c21ca2adc4b9ea90c089d089a131d8d`。
-- Forward-only hardening：`07bfe8dd0a1b129c2177018a5707ad9b573a85ed`、`d5c2bfe4f1d9ccf92b7f24a97e52cc312da3c9c9`。
-- CI 增加后台 updater 脚本、API/UI、Native ZIP 文件合同校验。
-- 当前分支 CI Green；精确 Run、Artifact ID 和 SHA256 由 GitHub Actions 当前 HEAD 生成，不写回包内文档以避免自引用改变包哈希。
-- 尚未标记 1208 Production Verified：真实服务器当前最后完整运行验证基线仍是 1206；1208 后台按钮 E2E 待做。
+### 验证状态
 
-## 2026-09-13 — 2026091207 安装器加固与 GitHub 命令行在线更新
-
-- 自动兼容宝塔 PostgreSQL localhost `ident`：备份并写入仅针对 ZONOE DB/user 的认证规则后 reload。
-- 前端部署改为 rsync 增量覆盖，保留 `.user.ini`、`.well-known`、`files`。
-- 删除无用 `pgcrypto` 硬依赖。
-- `/healthz` 改为读取根 `VERSION`。
-- `update.sh`/`install-online.sh` 支持 GitHub Stable、Tag、Branch/Ref 更新。
-- 更新前自动备份程序、前端和数据库；失败尝试回滚。
-
-## 2026-09-13 — 2026091206 真实宝塔运行验证
-
-- 真实站点 `https://ios.zonoeios.xyz` 的 systemd API、本机 PostgreSQL、首页、Assets、公开 API、HTTPS 均验证通过。
-- 修复登录/Admin 的前端运行时崩溃，移除该路径上的 `useNavigate()`，改用浏览器原生跳转。
-
-## 历史
-
-更早阶段包含 1203 宝塔 Native 初版、1202 白屏加固和 Docker 时代兼容链路。详细上下文以 Git 历史、`HANDOFF.md` 和 `PROJECT_STATE.json` 为准。
+- 本地 Shell 语法、Node 语法、Workflow YAML 解析已通过。
+- 当前改动提交后的 GitHub Actions CI / Artifact 仍需以最新 HEAD 结果为准。
+- 真实宝塔多 MySQL 源和后台一键更新 E2E 在部署候选包后验证；在此之前不标记 Production Verified。

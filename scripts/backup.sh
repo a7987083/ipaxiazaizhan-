@@ -1,20 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export PATH="/www/server/pgsql/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 DIR="$ROOT/backups/$STAMP"
 mkdir -p "$DIR"
-[[ -f "$ROOT/.env" ]] || { echo "缺少 $ROOT/.env" >&2; exit 1; }
-set +u
-set -a
-source "$ROOT/.env"
-set +a
-set -u
-command -v pg_dump >/dev/null 2>&1 || { echo "缺少 pg_dump" >&2; exit 1; }
-pg_dump "$DATABASE_URL" > "$DIR/database.sql"
-if [[ -d "$ROOT/data/uploads" ]]; then tar -C "$ROOT/data" -czf "$DIR/uploads.tar.gz" uploads; fi
-cp "$ROOT/.env" "$DIR/.env"
+[[ -f "$ROOT/.env" ]] && cp "$ROOT/.env" "$DIR/.env"
 [[ -f "$ROOT/VERSION" ]] && cp "$ROOT/VERSION" "$DIR/VERSION"
-chmod 600 "$DIR/.env"
+if [[ -d "$ROOT/data/control" ]]; then tar -C "$ROOT/data" -czf "$DIR/control.tar.gz" control; fi
+chmod 600 "$DIR/.env" 2>/dev/null || true
+cat > "$DIR/README.txt" <<'TXT'
+1208+ 应用数据与 IPA 都保留在原 MySQL 软件源，本备份不会复制外部数据库或 IPA。
+control.tar.gz 仅包含 ZONOE 管理员哈希、站点设置、加密的软件源连接配置与本地下载审计。
+TXT
 echo "$DIR"

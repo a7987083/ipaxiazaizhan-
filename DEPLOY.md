@@ -1,127 +1,72 @@
-# Deployment
+# BaoTa Native Deploy — 2026091208
 
-## 1. 默认方案：宝塔原生部署（无 Docker）
-
-从 `2026091203` 开始，宝塔部署默认不再运行 Docker。
-
-运行结构：
+## 1. 目标结构
 
 ```text
 BaoTa Nginx
-├─ /, /assets/*, /files/* -> <site>/public
-├─ /api/*                 -> 127.0.0.1:3000
-└─ /download/*            -> 127.0.0.1:3000
+├─ /                -> <site>/public
+├─ /api/*           -> 127.0.0.1:3000
+├─ /download/*      -> 127.0.0.1:3000
+└─ /healthz         -> 127.0.0.1:3000
 
-systemd: zonoe-api
-└─ Node.js 22 / Express
-   └─ PostgreSQL localhost:5432
+zonoe-api.service
+└─ Node.js 22
+   ├─ data/control (small local control plane)
+   └─ existing MySQL software-source DBs
 ```
 
-Redis 当前不是 API 启动的必需组件，原生部署默认不安装 Redis。
+PostgreSQL 不再是 ZONOE 1208 的运行时依赖。升级脚本不会自动停止或卸载系统 PostgreSQL，因为同机其他站点可能使用它。
 
-## 2. 宝塔一键部署包
+## 2. 宝塔站点
 
-CI / Release 会生成：
+- 网站根目录：`/www/wwwroot/ios_zonoeios_xyz`
+- 运行目录：`/public`
+- 伪静态：使用仓库 `nginx.rewrite`
+- Node API：systemd `zonoe-api`，监听 `127.0.0.1:3000`
 
-```text
-zonoe-ipa-download-<VERSION>-baota-native.zip
-zonoe-ipa-download-<VERSION>-baota-native.zip.sha256
-```
-
-宝塔导入 ZIP 后：
-
-- 网站运行目录：`/public`
-- 重写规则：`nginx.rewrite`
-- API：`127.0.0.1:3000`
-- 本地 IPA：`public/files -> data/uploads` 符号链接，由 Nginx 直接发送
-
-`auto_install.json` 已声明 `run_path=/public`。
-
-### install.sh 会做什么
-
-`install.sh` 是幂等的原生部署入口：
-
-1. 检查基础工具。
-2. 检查 Node.js 22；版本不足时通过 NodeSource 安装。
-3. 检查本机 PostgreSQL；缺失时安装并启动。
-4. 创建 `zonoe` 数据库用户和数据库。
-5. 生成/修正 `.env`，将数据库地址切换为 `127.0.0.1:5432`。
-6. `npm ci`。
-7. `npm run build`。
-8. 将 `apps/web/dist` 同步为网站 `public/`。
-9. 创建 `zonoe-api` systemd 服务。
-10. Migration + Seed。
-11. 检查 `127.0.0.1:3000/healthz`。
-12. 检查 `public/index.html` 引用的实际 JS Asset 是否存在。
-
-管理员凭据保存在 `data/install-info.txt`。
-
-## 3. 从旧 Docker 宝塔版迁移
-
-如果站点目录中存在旧 `docker-compose.yml`，并且 PostgreSQL 容器仍在运行，新的 `install.sh` 会：
-
-1. 在 `backups/native-migration-<timestamp>/database.sql` 导出旧 PostgreSQL。
-2. 保存旧 `.env`。
-3. 执行 `docker compose down`；不会删除 Docker volume。
-4. 安装/启动本机 PostgreSQL。
-5. 创建本机 `zonoe` 数据库。
-6. 在本机数据库为空时自动导入旧 SQL。
-7. 保留 `data/uploads`。
-8. 启动新的 systemd API。
-
-迁移完成后先不要手动删除旧 Docker volume。确认新站点、后台和数据全部正常后再清理。
-
-## 4. HTTPS
-
-首次安装可先使用 HTTP。宝塔签发并启用证书后执行：
+## 3. 安装
 
 ```bash
-sudo bash scripts/enable-https.sh your.domain
+cd /www/wwwroot/ios_zonoeios_xyz
+chmod +x install.sh update.sh scripts/*.sh
+bash install.sh ios.zonoeios.xyz
 ```
 
-该脚本会更新 `PUBLIC_BASE_URL`、`FRONTEND_ORIGIN`、`COOKIE_SECURE=true`，然后重启 `zonoe-api`。
+安装器只要求 MySQL **客户端** 可用。宝塔 MySQL 常见路径 `/www/server/mysql/bin/mysql` 会自动检测；不会再安装第二套 PostgreSQL 数据库服务。
 
-## 5. 日常运维
+## 4. 添加软件源
 
-```bash
-systemctl status zonoe-api
-journalctl -u zonoe-api -f
-curl http://127.0.0.1:3000/healthz
-./scripts/smoke.sh https://your.domain
-```
+登录 `/admin` →「软件源」→ 新增：
+
+- 名称 / Slug
+- Host / Port
+- Database
+- Username / Password
+- Table（默认 `fa_category`）
+- 优先级 / 启用状态
+- 可选：回写下载次数
+
+建议给 ZONOE 使用只读 MySQL 账号；只有确实希望把下载次数回写到原 `cs` 字段时才启用“回写下载次数”。
+
+## 5. 数据与文件
+
+ZONOE 不迁移应用表，也不复制 IPA。每次列表、搜索、详情都从已启用的软件源查询，下载时 302 到 `bt1a`。因此新增第 4、第 5 个源只需后台增加连接。
 
 ## 6. 备份
 
 ```bash
-./scripts/backup.sh
+bash scripts/backup.sh
 ```
 
-备份包含 `database.sql`、`uploads.tar.gz`、`.env`、`VERSION`，数据库使用本机 `pg_dump`，不依赖 Docker。
+备份的是 `.env`、VERSION 和 `data/control`。外部软件源数据库和 IPA 不属于 ZONOE 更新的写入范围，不会被重复打包。
 
 ## 7. 在线更新
 
-进入站点根目录：
+后台「在线更新」或 CLI：
 
 ```bash
-sudo bash update.sh
+bash update.sh --check
+bash update.sh
 ```
 
-流程：最新 Release -> SHA256 -> 备份 -> 停止当前服务 -> 覆盖程序（保留 data/backups/.env）-> `install.sh` 原生重建 -> Migration/Seed -> systemd restart -> health check。
-
-## 8. 本地部署包更新
-
-```bash
-sudo bash install-local.sh ./zonoe-ipa-download.tar.gz ./zonoe-ipa-download.tar.gz.sha256
-```
-
-## 9. Docker 兼容方案
-
-仓库仍保留 `docker-compose.yml`、Dockerfile、`deploy/` 和 `.env.docker.example`。需要 Docker 时可：
-
-```bash
-cp .env.docker.example .env
-# 修改密码与 Secret
-docker compose up -d --build
-```
-
-Docker 不再是宝塔默认安装方式，也不会包含在 `baota-native.zip` 中。
+Web 更新 forward-only；不会从开发版强制降级到较低 Stable。
