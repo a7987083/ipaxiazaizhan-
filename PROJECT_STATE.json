@@ -1,14 +1,70 @@
 {
+  "schema_version": 1,
   "repository": "a7987083/ipaxiazaizhan-",
-  "branch": "work/zonoe-download-v1",
+  "branch": "feature/baota-oneclick-deploy-v1",
   "version": "2026091201",
-  "phase": "Phase 1 Production Foundation",
-  "stable_baseline": "d5bb60cd119aac9b6166892ffb8cc3427289b18a",
-  "status": "implementation_complete_pending_ci",
-  "ui_baseline": "ZONOE blue-white App Store style, Mobile First + PC",
-  "storage": "adapter-based; OpenList/Tianyi via 302; optional JP local hot mirror",
-  "deployment": ["github_release_online_update", "local_deployment_package"],
-  "completed": ["database", "public_api", "admin_api", "download_service", "storage_adapters", "frontend", "mobile_admin", "docker", "nginx", "installer", "backup_rollback", "integration_tests", "docs"],
-  "verification": {"api_node_syntax": "passed", "integration_tests": "pending_ci", "frontend_build": "pending_ci", "docker_build": "pending_ci", "production_smoke": "pending"},
-  "next_task": "CI green, release package, online update E2E, real OpenList/Tianyi source verification"
+  "commit": "e9bb144a045bc51efbe74fa19f85f412878f09b0",
+  "commit_semantics": "implementation_baseline",
+  "commit_message": "deploy: align BaoTa metadata with external PostgreSQL installer",
+  "workflow": ".github/workflows/ci-release.yml",
+  "actions_run": 34689591609,
+  "ci_status": "success",
+  "artifact": "zonoe-ipa-download-2026091201-baota-build",
+  "phase": "Phase 1.1 BaoTa Deployment Hardening & Production Verification",
+  "phase_status": "ci_green_production_verification_pending",
+  "production_verified": false,
+  "current_blocker": "blank_page_after_real_baota_deployment",
+  "public_release": {
+    "tag": "download-v2026091201",
+    "target_commit": "6b7ff7e6aa2c626428c1a835e07eed2aedfe05e3",
+    "status": "outdated_vs_current_branch"
+  },
+  "deployment": {
+    "mode": "baota_reverse_proxy_to_docker",
+    "internal_http": "127.0.0.1:18081",
+    "internal_https": "127.0.0.1:18443",
+    "services": ["postgres", "redis", "api", "web", "nginx"],
+    "preserve_on_update": [".env", "data", "backups"]
+  },
+  "completed": [
+    "database",
+    "public_api",
+    "admin_api",
+    "download_service",
+    "storage_adapters",
+    "frontend",
+    "mobile_admin",
+    "docker",
+    "internal_nginx",
+    "baota_installer",
+    "backup_rollback",
+    "integration_tests",
+    "ci_build",
+    "baota_ci_artifact"
+  ],
+  "verification": {
+    "integration_tests": "passed_ci",
+    "frontend_build": "passed_ci",
+    "docker_build": "passed_ci",
+    "baota_package_contract": "passed_ci",
+    "real_baota_install": "failed_blank_page_reported",
+    "real_domain_assets": "pending",
+    "real_domain_api": "pending",
+    "admin_login": "pending",
+    "online_update_e2e": "pending"
+  },
+  "known_issues": [
+    "blank_page_after_deployment",
+    "stable_release_behind_feature_branch",
+    "version_not_bumped_after_baota_fixes",
+    "readme_install_path_not_aligned_with_default_branch"
+  ],
+  "next_task": "Reproduce and fix BaoTa blank page using the successful CI artifact; verify assets and API through the real domain; then bump VERSION and publish a new stable release.",
+  "state_docs": [
+    "ROADMAP.md",
+    "CHANGELOG_DEV.md",
+    "HANDOFF.md",
+    "PROJECT_STATE.json",
+    "KNOWN_ISSUES.md"
+  ]
 }
