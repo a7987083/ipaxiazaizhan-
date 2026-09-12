@@ -131,6 +131,8 @@ jobs:
           grep -Fq 'DEPLOY_MODE native' install.sh
           grep -Fq 'zonoe-api' install.sh
           grep -Fq 'systemctl' install.sh
+          grep -Fq 'data/install.log' install.sh
+          grep -Fq 'ALTER ROLE :"role" WITH LOGIN PASSWORD :'"'"'dbpass'"'"';' install.sh
           ! grep -Fq 'docker compose up' install.sh
           test -f public/index.html
       - name: Legacy Docker compose syntax
@@ -175,11 +177,13 @@ jobs:
           grep -Fxq './install-online.sh' package-files.txt
           grep -Fxq './auto_install.json' package-files.txt
           grep -Fxq './install.sh' package-files.txt
+          grep -Fxq './scripts/native-install.sh' package-files.txt
           grep -Fxq './nginx.rewrite' package-files.txt
           grep -Fxq './public/index.html' package-files.txt
           unzip -Z1 "$NATIVE_ZIP" > baota-files.txt
           grep -Fxq 'auto_install.json' baota-files.txt
           grep -Fxq 'install.sh' baota-files.txt
+          grep -Fxq 'scripts/native-install.sh' baota-files.txt
           grep -Fxq 'insatll.sh' baota-files.txt
           grep -Fxq 'update.sh' baota-files.txt
           grep -Fxq 'nginx.rewrite' baota-files.txt
