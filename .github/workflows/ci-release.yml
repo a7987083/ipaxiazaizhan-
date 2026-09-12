@@ -103,6 +103,19 @@ jobs:
           docker compose config >/dev/null
       - name: Docker image build
         run: docker compose build api web
+      - name: Frontend image smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$(docker compose images -q web)"
+          test -n "$IMAGE"
+          docker run -d --rm --name zonoe-web-smoke -p 127.0.0.1:18082:80 "$IMAGE"
+          trap 'docker rm -f zonoe-web-smoke >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:18082/ >/tmp/zonoe-web-index.html 2>/dev/null && break; sleep 1; done
+          grep -q 'ZONOE' /tmp/zonoe-web-index.html
+          ASSET="$(grep -oE '/assets/[^"[:space:]]+\.js' /tmp/zonoe-web-index.html | head -n1)"
+          test -n "$ASSET"
+          curl -fsS "http://127.0.0.1:18082${ASSET}" >/dev/null
 
   package-and-release:
     needs: validate

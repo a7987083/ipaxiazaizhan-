@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026091202 - Frontend Boot Reliability
+
+- Docker Web/API 构建改用仓库根 `package-lock.json` + `npm ci`，部署与 CI 使用同一锁定依赖。
+- Web 启动页加入可见启动占位与静态资源失败提示，避免前端资源异常时只显示纯白页。
+- React 顶层加入 Fatal Error Boundary，运行时渲染异常会显示错误信息。
+- Smoke Test 增加首页 HTML 与构建后 JS Asset 可达性检查。
+- 版本升级为 `2026091202`。
+
 ## 2026091201 - Phase 1 Production Foundation
 
 - 完成 Mobile First IPA 下载站前台：首页、列表、搜索、排序、详情、截图、历史版本。

@@ -117,10 +117,14 @@ log "构建并启动 PostgreSQL / Redis / API / Web / 内部 Nginx"
 log "等待内部健康检查"
 ok=0
 for _ in $(seq 1 60); do
-  if curl -fsS "http://127.0.0.1:${HTTP_PORT}/healthz" >/dev/null 2>&1; then ok=1; break; fi
+  if curl -fsS "http://127.0.0.1:${HTTP_PORT}/healthz" >/dev/null 2>&1; then
+    html="$(curl -fsS "http://127.0.0.1:${HTTP_PORT}/" 2>/dev/null || true)"
+    asset="$(printf '%s' "$html" | grep -oE '/assets/[^"[:space:]]+\.js' | head -n1 || true)"
+    if [[ -n "$asset" ]] && curl -fsS "http://127.0.0.1:${HTTP_PORT}${asset}" >/dev/null 2>&1; then ok=1; break; fi
+  fi
   sleep 2
 done
-[[ "$ok" -eq 1 ]] || { (cd "$ROOT" && docker compose ps) || true; die "服务健康检查失败"; }
+[[ "$ok" -eq 1 ]] || { (cd "$ROOT" && docker compose ps) || true; die "服务健康检查失败：API 或前端静态资源不可用"; }
 
 (cd "$ROOT" && docker compose exec -T api npm run seed) || die "管理员初始化失败"
 touch "$MARKER"
