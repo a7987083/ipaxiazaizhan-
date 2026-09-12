@@ -8,6 +8,7 @@ import { env } from '../config/env.js';
 import { asyncHandler,ok,AppError } from '../utils/http.js';
 import { csrfToken,encryptJson } from '../utils/crypto.js';
 import { login } from '../services/authService.js';
+import { getOnlineUpdateStatus,queueOnlineUpdate } from '../services/updateService.js';
 import { loginLimiter } from '../middleware/rateLimit.js';
 import { requireAdmin,requireCsrf } from '../middleware/auth.js';
 import * as apps from '../repositories/appRepository.js';
@@ -49,6 +50,18 @@ r.delete('/sources/:id',asyncHandler(async(req,res)=>ok(res,{deleted:await admin
 r.get('/statistics',asyncHandler(async(_req,res)=>ok(res,await admin.statistics())));
 r.get('/settings',asyncHandler(async(_req,res)=>ok(res,await admin.getSettings(false))));
 r.put('/settings/:key',asyncHandler(async(req,res)=>{ const p=z.object({value:z.any(),isPublic:z.boolean().optional()}).parse(req.body); await admin.setSetting(req.params.key,p.value,p.isPublic||false); ok(res,{updated:true}); }));
+
+r.get('/system/update',asyncHandler(async(_req,res)=>ok(res,await getOnlineUpdateStatus())));
+r.post('/system/update',asyncHandler(async(req,res)=>{
+  const p=z.object({force:z.boolean().optional().default(false)}).parse(req.body||{});
+  try {
+    const requestedBy=String(req.admin?.username||req.admin?.email||req.admin?.sub||'admin');
+    ok(res,await queueOnlineUpdate({force:p.force,requestedBy}));
+  } catch(e) {
+    if(e?.code==='UPDATE_BUSY') throw new AppError(409,'UPDATE_BUSY',e.message);
+    throw e;
+  }
+}));
 
 await fs.mkdir(env.LOCAL_STORAGE_DIR,{recursive:true});
 const upload=multer({dest:env.LOCAL_STORAGE_DIR,limits:{fileSize:env.MAX_UPLOAD_MB*1024*1024}});
