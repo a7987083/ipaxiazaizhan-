@@ -13,16 +13,43 @@ export PATH="/www/server/pgsql/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr
 safe_extract(){
   local pkg="$1" dst="$2"
   python3 - "$pkg" "$dst" <<'PY'
-import os,sys,tarfile
+import os,stat,sys,tarfile,zipfile
 pkg,dst=sys.argv[1:]
 os.makedirs(dst,exist_ok=True)
-with tarfile.open(pkg,'r:gz') as t:
-    for m in t.getmembers():
-        n=m.name
-        if n.startswith('/') or '..' in n.split('/') or m.issym() or m.islnk():
-            raise SystemExit(f'unsafe archive entry: {n}')
-    t.extractall(dst)
+def unsafe(n):
+    n=n.replace('\\','/')
+    return n.startswith('/') or '..' in n.split('/')
+if zipfile.is_zipfile(pkg):
+    with zipfile.ZipFile(pkg) as z:
+        for i in z.infolist():
+            if unsafe(i.filename):
+                raise SystemExit(f'unsafe zip entry: {i.filename}')
+            mode=(i.external_attr >> 16) & 0o170000
+            if stat.S_ISLNK(mode):
+                raise SystemExit(f'zip symlink not allowed: {i.filename}')
+        z.extractall(dst)
+else:
+    with tarfile.open(pkg,'r:*') as t:
+        for m in t.getmembers():
+            if unsafe(m.name) or m.issym() or m.islnk():
+                raise SystemExit(f'unsafe tar entry: {m.name}')
+        t.extractall(dst)
 PY
+}
+
+resolve_source_root(){
+  local dst="$1"
+  if [[ -f "$dst/install.sh" && -f "$dst/package-lock.json" ]]; then
+    printf '%s\n' "$dst"
+    return 0
+  fi
+  local candidates=()
+  while IFS= read -r -d '' f; do
+    local d; d="$(dirname "$f")"
+    [[ -f "$d/package-lock.json" ]] && candidates+=("$d")
+  done < <(find "$dst" -mindepth 2 -maxdepth 2 -type f -name install.sh -print0)
+  [[ ${#candidates[@]} -eq 1 ]] || die "部署包结构无法识别（install.sh/package-lock.json）"
+  printf '%s\n' "${candidates[0]}"
 }
 
 source_env(){
@@ -43,9 +70,14 @@ backup_current(){
 
   [[ -d "$INSTALL_DIR" ]] || return 0
   log "备份当前程序 -> $CURRENT_BACKUP/program.tar.gz"
-  tar --exclude='./backups' --exclude='./data' --exclude='./.env' --exclude='./node_modules' --exclude='./public' -C "$INSTALL_DIR" -czf "$CURRENT_BACKUP/program.tar.gz" . || true
+  tar --exclude='./backups' --exclude='./data' --exclude='./.env' --exclude='./node_modules' --exclude='./public' \
+    -C "$INSTALL_DIR" -czf "$CURRENT_BACKUP/program.tar.gz" . || true
   [[ -f "$INSTALL_DIR/.env" ]] && cp "$INSTALL_DIR/.env" "$CURRENT_BACKUP/.env"
   [[ -f "$INSTALL_DIR/VERSION" ]] && cp "$INSTALL_DIR/VERSION" "$CURRENT_BACKUP/VERSION"
+
+  if [[ -d "$INSTALL_DIR/public" ]]; then
+    tar --exclude='./files' -C "$INSTALL_DIR/public" -czf "$CURRENT_BACKUP/public.tar.gz" . || true
+  fi
 
   if command -v docker >/dev/null 2>&1 && [[ -f "$INSTALL_DIR/docker-compose.yml" ]] && (cd "$INSTALL_DIR" && docker compose ps --status running --services 2>/dev/null | grep -qx postgres); then
     log "备份旧 Docker PostgreSQL"
@@ -69,48 +101,91 @@ stop_current(){
   fi
 }
 
+restore_public(){
+  local b="$1"
+  [[ -f "$b/public.tar.gz" ]] || return 0
+  local ptmp; ptmp="$(mktemp -d)"
+  tar -xzf "$b/public.tar.gz" -C "$ptmp"
+  mkdir -p "$INSTALL_DIR/public"
+  rsync -a --delete \
+    --exclude='.user.ini' \
+    --exclude='.well-known/' \
+    --exclude='files' \
+    "$ptmp/" "$INSTALL_DIR/public/" || true
+  rm -rf "$ptmp"
+  if [[ -d "$INSTALL_DIR/data/uploads" ]]; then
+    rm -rf "$INSTALL_DIR/public/files" 2>/dev/null || true
+    ln -s "$INSTALL_DIR/data/uploads" "$INSTALL_DIR/public/files" 2>/dev/null || true
+  fi
+}
+
 restore_backup(){
   local b="${CURRENT_BACKUP:-}"
   [[ -n "$b" && -d "$b" ]] || return 1
-  warn "部署失败，开始自动回滚: $b"
-  find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name data ! -name backups ! -name .env -exec rm -rf {} + || true
+  warn "部署失败，开始自动回滚程序: $b"
+
+  # Keep BaoTa's public directory in place so immutable .user.ini is never removed.
+  find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 \
+    ! -name data ! -name backups ! -name .env ! -name public \
+    -exec rm -rf {} + || true
   [[ -f "$b/program.tar.gz" ]] && tar -xzf "$b/program.tar.gz" -C "$INSTALL_DIR"
   [[ -f "$b/.env" ]] && cp "$b/.env" "$INSTALL_DIR/.env"
+  restore_public "$b"
 
   if [[ "${CURRENT_MODE:-}" == "docker" && -f "$INSTALL_DIR/docker-compose.yml" ]] && command -v docker >/dev/null 2>&1; then
     (cd "$INSTALL_DIR" && docker compose up -d --build) || true
     return 0
   fi
 
-  if [[ -x "$INSTALL_DIR/install.sh" || -f "$INSTALL_DIR/install.sh" ]]; then
-    (cd "$INSTALL_DIR" && bash install.sh "${ZONOE_DOMAIN:-}") || true
-  else
-    systemctl restart zonoe-api >/dev/null 2>&1 || true
+  if [[ -f "$INSTALL_DIR/package-lock.json" ]] && command -v npm >/dev/null 2>&1; then
+    (cd "$INSTALL_DIR" && npm ci) >/dev/null 2>&1 || warn "回滚依赖恢复失败；程序文件已恢复"
+  fi
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl restart zonoe-api >/dev/null 2>&1 || true
+
+  if ! curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1; then
+    warn "程序已回滚，但 API 未恢复；数据库备份位于 $b/database.sql（如存在）"
   fi
 }
 
 deploy_package(){
   local pkg="$1"
   [[ "$(id -u)" -eq 0 ]] || die "安装/更新需要 root 权限"
-  need python3; need tar; need curl
+  need python3; need tar; need curl; need rsync
   [[ -f "$pkg" ]] || die "部署包不存在: $pkg"
 
-  local tmp; tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
-  safe_extract "$pkg" "$tmp/src"
-  [[ -f "$tmp/src/install.sh" ]] || die "部署包缺少 install.sh"
-  [[ -f "$tmp/src/package-lock.json" ]] || die "部署包缺少 package-lock.json"
+  local tmp; tmp="$(mktemp -d)"
+  local old_return_trap
+  old_return_trap="$(trap -p RETURN || true)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  safe_extract "$pkg" "$tmp/unpack"
+  local src; src="$(resolve_source_root "$tmp/unpack")"
+  [[ -f "$src/install.sh" ]] || die "部署包缺少 install.sh"
+  [[ -f "$src/package-lock.json" ]] || die "部署包缺少 package-lock.json"
+
+  local new_version
+  new_version="$(tr -d '\r\n ' < "$src/VERSION" 2>/dev/null || true)"
+  [[ "$new_version" =~ ^20[0-9]{8,12}$ ]] || die "部署包 VERSION 无效"
 
   backup_current
   stop_current
 
-  mkdir -p "$INSTALL_DIR/data/uploads" "$INSTALL_DIR/data/update-runtime" "$INSTALL_DIR/backups"
+  mkdir -p "$INSTALL_DIR/data/uploads" "$INSTALL_DIR/data/update-runtime" "$INSTALL_DIR/backups" "$INSTALL_DIR/public"
   local envtmp=''
   [[ -f "$INSTALL_DIR/.env" ]] && envtmp="$(mktemp)" && cp "$INSTALL_DIR/.env" "$envtmp"
 
-  find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name data ! -name backups ! -name .env -exec rm -rf {} +
-  cp -a "$tmp/src/." "$INSTALL_DIR/"
-  if [[ -n "$envtmp" ]]; then cp "$envtmp" "$INSTALL_DIR/.env"; rm -f "$envtmp"; fi
+  # Do not remove public/: BaoTa may set immutable on public/.user.ini.
+  # Stage the new source tree while preserving runtime data and built frontend.
+  rsync -a --delete \
+    --exclude='.env' \
+    --exclude='data/' \
+    --exclude='backups/' \
+    --exclude='public/' \
+    --exclude='node_modules/' \
+    "$src/" "$INSTALL_DIR/"
 
+  if [[ -n "$envtmp" ]]; then cp "$envtmp" "$INSTALL_DIR/.env"; rm -f "$envtmp"; fi
   chmod +x "$INSTALL_DIR"/*.sh "$INSTALL_DIR"/scripts/*.sh 2>/dev/null || true
 
   source_env
@@ -125,4 +200,6 @@ deploy_package(){
   fi
 
   log "部署完成，版本: $(cat "$INSTALL_DIR/VERSION" 2>/dev/null || echo unknown)"
+  [[ -n "$old_return_trap" ]] && eval "$old_return_trap" || trap - RETURN
+  rm -rf "$tmp"
 }

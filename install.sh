@@ -204,9 +204,67 @@ Generated: $(date -Iseconds)
 
 启用 HTTPS 后请执行：
   bash scripts/enable-https.sh $DOMAIN
+
+在线更新：
+  bash update.sh
 INFO
     chmod 600 "$ROOT/data/install-info.txt"
   fi
+}
+
+database_password_test(){
+  PGPASSWORD="${POSTGRES_PASSWORD}" PGCONNECT_TIMEOUT=5 \
+    psql -h 127.0.0.1 -p 5432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc 'SELECT 1' >/dev/null 2>&1
+}
+
+ensure_postgres_password_auth(){
+  if database_password_test; then return 0; fi
+
+  local hba backup
+  hba="$(runuser -u postgres -- psql -d postgres -Atqc 'SHOW hba_file;' 2>/dev/null | tail -n1 | tr -d '\r')"
+  [[ -n "$hba" && -f "$hba" ]] || die "数据库密码认证失败，且无法定位 pg_hba.conf"
+
+  backup="$ROOT/backups/pg_hba.conf.$(date +%Y%m%d_%H%M%S).bak"
+  cp -a "$hba" "$backup"
+  log "检测到 PostgreSQL 本机密码认证不兼容，自动写入 ZONOE 专用 pg_hba 规则"
+  log "pg_hba.conf 已备份: $backup"
+
+  python3 - "$hba" "$POSTGRES_DB" "$POSTGRES_USER" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]); db=sys.argv[2]; user=sys.argv[3]
+begin="# BEGIN ZONOE MANAGED AUTH"
+end="# END ZONOE MANAGED AUTH"
+lines=p.read_text(encoding="utf-8").splitlines()
+out=[]; skip=False
+for line in lines:
+    if line.strip()==begin:
+        skip=True
+        continue
+    if skip and line.strip()==end:
+        skip=False
+        continue
+    if not skip:
+        out.append(line)
+block=[
+    begin,
+    f"host    {db}    {user}    127.0.0.1/32    md5",
+    f"host    {db}    {user}    ::1/128         md5",
+    end,
+    "",
+]
+p.write_text("\n".join(block+out).rstrip()+"\n", encoding="utf-8")
+PY
+
+  runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -Atqc 'SELECT pg_reload_conf();' >/dev/null
+  for _ in $(seq 1 10); do
+    if database_password_test; then
+      log "PostgreSQL localhost 密码认证已自动修复"
+      return 0
+    fi
+    sleep 1
+  done
+  die "已更新 pg_hba.conf 但密码连接仍失败。备份文件: $backup"
 }
 
 prepare_database(){
@@ -227,6 +285,8 @@ SQL
     runuser -u postgres -- createdb -O "$POSTGRES_USER" "$POSTGRES_DB"
   fi
 
+  ensure_postgres_password_auth
+
   if [[ -n "${MIGRATION_DUMP:-}" && -s "$MIGRATION_DUMP" ]]; then
     local has_users
     has_users="$(psql "$DATABASE_URL" -tAc "SELECT to_regclass('public.users') IS NOT NULL" | tr -d '[:space:]')"
@@ -246,9 +306,19 @@ build_application(){
   (cd "$ROOT" && npm run build)
 
   [[ -f "$ROOT/apps/web/dist/index.html" ]] || die "前端构建产物缺少 index.html"
-  rm -rf "$ROOT/public"
   mkdir -p "$ROOT/public"
-  cp -a "$ROOT/apps/web/dist/." "$ROOT/public/"
+
+  # BaoTa may protect public/.user.ini with the immutable bit. Never delete the
+  # whole public directory; replace only application build output.
+  rsync -a --delete \
+    --exclude='.user.ini' \
+    --exclude='.well-known/' \
+    --exclude='files' \
+    "$ROOT/apps/web/dist/" "$ROOT/public/"
+
+  if [[ -L "$ROOT/public/files" || -e "$ROOT/public/files" ]]; then
+    rm -rf "$ROOT/public/files"
+  fi
   ln -s "$ROOT/data/uploads" "$ROOT/public/files"
 }
 
@@ -327,14 +397,12 @@ main(){
   write_systemd_service
   start_application
   touch "$ROOT/.zonoe-native-installed"
-  chmod 600 "$ROOT/.zonoe-native-installed"
   log "宝塔原生部署完成（无 Docker）。"
+  log "版本: $(tr -d '\r\n ' < "$ROOT/VERSION" 2>/dev/null || echo unknown)"
   log "站点目录: $ROOT/public"
   log "API: http://127.0.0.1:3000"
-  log "后台: http://$DOMAIN/admin"
-  log "管理员信息: $ROOT/data/install-info.txt"
   log "安装日志: $LOG_FILE"
-  log "宝塔网站运行目录必须设置为 /public，并加载 nginx.rewrite。"
+  log "在线更新: cd $ROOT && bash update.sh"
 }
 
 main "$@"

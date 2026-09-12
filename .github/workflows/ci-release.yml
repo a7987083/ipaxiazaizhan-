@@ -88,11 +88,17 @@ jobs:
           API_PID=$!
           trap 'kill "$API_PID" >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3001/healthz >/dev/null 2>&1; then break; fi
+            if curl -fsS http://127.0.0.1:3001/healthz >/tmp/health.json 2>/dev/null; then break; fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:3001/healthz
           curl -fsS http://127.0.0.1:3001/api/v1/home >/dev/null
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/health.json'))
+          expected=open('VERSION').read().strip()
+          assert j.get('ok') is True
+          assert j.get('version') == expected, (j, expected)
+          PY
       - name: Native frontend static smoke
         shell: bash
         run: |
@@ -108,6 +114,8 @@ jobs:
           ASSET="$(grep -oE '/assets/[^"[:space:]]+\.js' /tmp/zonoe-web-index.html | head -n1)"
           test -n "$ASSET"
           curl -fsS "http://127.0.0.1:18082${ASSET}" >/dev/null
+          grep -Fq "window.location.assign('/admin')" apps/web/src/pages/Login.jsx
+          grep -Fq "window.location.assign('/login')" apps/web/src/pages/Admin.jsx
       - name: Shell validation
         run: |
           bash -n install.sh
@@ -120,6 +128,8 @@ jobs:
           bash -n scripts/smoke.sh
           bash -n scripts/backup.sh
           bash -n scripts/enable-https.sh
+          bash update.sh --help >/tmp/update-help.txt
+          grep -Fq 'GitHub 在线更新' /tmp/update-help.txt
       - name: BaoTa native contract
         shell: bash
         run: |
@@ -130,11 +140,27 @@ jobs:
           grep -Fq 'proxy_pass http://127.0.0.1:3000;' nginx.rewrite
           grep -Fq 'DEPLOY_MODE native' install.sh
           grep -Fq 'zonoe-api' install.sh
-          grep -Fq 'systemctl' install.sh
           grep -Fq 'data/install.log' install.sh
           grep -Fq 'ALTER ROLE :"role" WITH LOGIN PASSWORD :'"'"'dbpass'"'"';' install.sh
+          grep -Fq '# BEGIN ZONOE MANAGED AUTH' install.sh
+          grep -Fq 'SHOW hba_file;' install.sh
+          grep -Fq -- "--exclude='.user.ini'" install.sh
+          grep -Fq -- "--exclude='.well-known/'" install.sh
+          ! grep -Fq 'rm -rf "$ROOT/public"' install.sh
           ! grep -Fq 'docker compose up' install.sh
           test -f public/index.html
+      - name: GitHub updater contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'releases/latest' install-online.sh
+          grep -Fq -- '--branch' install-online.sh
+          grep -Fq 'baota-native\.zip' install-online.sh
+          grep -Fq 'sha256sum -c' install-online.sh
+          grep -Fq 'update-history.log' install-online.sh
+          grep -Fq -- "--exclude='public/'" scripts/lib-deploy.sh
+          grep -Fq -- "--exclude='.user.ini'" scripts/lib-deploy.sh
+          grep -Fq 'zipfile.is_zipfile' scripts/lib-deploy.sh
       - name: Legacy Docker compose syntax
         shell: bash
         run: |
@@ -186,8 +212,10 @@ jobs:
           grep -Fxq 'scripts/native-install.sh' baota-files.txt
           grep -Fxq 'insatll.sh' baota-files.txt
           grep -Fxq 'update.sh' baota-files.txt
+          grep -Fxq 'install-online.sh' baota-files.txt
           grep -Fxq 'nginx.rewrite' baota-files.txt
           grep -Fxq 'public/index.html' baota-files.txt
+          cmp <(unzip -p "$NATIVE_ZIP" install.sh) <(unzip -p "$NATIVE_ZIP" scripts/native-install.sh)
           ! grep -Eq '^docker-compose.*\.yml$' baota-files.txt
           ! grep -Eq '^apps/(api|web)/Dockerfile$' baota-files.txt
           ! grep -Eq '^\.github/' baota-files.txt
