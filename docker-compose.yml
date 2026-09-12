@@ -31,8 +31,13 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       LOCAL_STORAGE_DIR: /data/uploads
+      UPDATE_RUNTIME_DIR: ${UPDATE_RUNTIME_DIR:-/runtime/update}
+      VERSION_FILE: ${VERSION_FILE:-/app/VERSION}
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-a7987083/ipaxiazaizhan-}
     volumes:
       - ./data/uploads:/data/uploads
+      - ./data/update-runtime:/runtime/update
+      - ./VERSION:/app/VERSION:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,8 +57,8 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "${NGINX_HTTP_BIND:-80}:80"
+      - "${NGINX_HTTPS_BIND:-443}:443"
     volumes:
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./data/uploads:/srv/files:ro

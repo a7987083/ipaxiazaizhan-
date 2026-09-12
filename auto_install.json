@@ -1,0 +1,17 @@
+{
+  "php_ext":"",
+  "chmod":[
+    {"mode":755,"path":"/install.sh"},
+    {"mode":755,"path":"/insatll.sh"},
+    {"mode":755,"path":"/update.sh"},
+    {"mode":755,"path":"/install-online.sh"}
+  ],
+  "success_url":"/",
+  "php_versions":"74,80,81,82,83,84",
+  "db_config":"",
+  "admin_username":"admin",
+  "admin_password":"安装时随机生成，请查看安装日志或 data/install-info.txt",
+  "run_path":"/",
+  "remove_file":["/index.html","/404.html","/.user.ini"],
+  "enable_functions":[]
+}

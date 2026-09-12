@@ -4,17 +4,24 @@ on:
   push:
     branches:
       - work/zonoe-download-v1
+      - feature/baota-oneclick-deploy-v1
     paths:
       - 'VERSION'
       - 'apps/**'
       - 'deploy/**'
       - 'scripts/**'
+      - 'auto_install.json'
+      - 'nginx.rewrite'
+      - 'install.sh'
+      - 'insatll.sh'
+      - 'update.sh'
       - 'install-local.sh'
       - 'install-online.sh'
       - 'docker-compose*.yml'
       - 'package.json'
       - 'package-lock.json'
       - '.env.example'
+      - 'DEPLOY.md'
       - '.github/workflows/ci-release.yml'
   workflow_dispatch:
 
@@ -22,7 +29,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: zonoe-ipa-download-release
+  group: zonoe-ipa-download-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -70,12 +77,25 @@ jobs:
         run: npm run build
       - name: Shell validation
         run: |
+          bash -n install.sh
+          bash -n insatll.sh
+          bash -n update.sh
           bash -n install-local.sh
           bash -n install-online.sh
           bash -n scripts/build-release.sh
           bash -n scripts/lib-deploy.sh
           bash -n scripts/smoke.sh
           bash -n scripts/backup.sh
+      - name: BaoTa one-click contract
+        run: |
+          set -euo pipefail
+          python3 -m json.tool auto_install.json >/dev/null
+          test "$(python3 -c 'import json; print(json.load(open("auto_install.json"))["run_path"])')" = "/"
+          test "$(python3 -c 'import json; print(json.load(open("auto_install.json"))["db_config"])')" = ""
+          grep -Fq 'proxy_pass http://127.0.0.1:18081;' nginx.rewrite
+          grep -Fq 'HTTP_PORT=18081' install.sh
+          grep -Fq 'INSTALL_DIR="$ROOT"' update.sh
+          grep -Fq '${NGINX_HTTP_BIND:-80}:80' docker-compose.yml
       - name: Compose validation
         run: |
           cp .env.example .env
@@ -102,20 +122,33 @@ jobs:
           TAG="download-v${VERSION}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-      - name: Build local deployment package
+      - name: Build deployment packages
         run: ./scripts/build-release.sh "$PWD/dist-release"
-      - name: Validate package
+      - name: Validate packages
         shell: bash
         run: |
           set -euo pipefail
           cd dist-release
           sha256sum -c zonoe-ipa-download.tar.gz.sha256
+          sha256sum -c "zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota.zip.sha256"
           tar -tzf zonoe-ipa-download.tar.gz > package-files.txt
           grep -Fxq './docker-compose.yml' package-files.txt
           grep -Fxq './install-local.sh' package-files.txt
           grep -Fxq './install-online.sh' package-files.txt
+          grep -Fxq './auto_install.json' package-files.txt
+          grep -Fxq './install.sh' package-files.txt
+          grep -Fxq './nginx.rewrite' package-files.txt
           ! grep -Fq './.github/workflows/bootstrap-v2.yml' package-files.txt
+          unzip -Z1 "zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota.zip" > baota-files.txt
+          grep -Fxq 'auto_install.json' baota-files.txt
+          grep -Fxq 'install.sh' baota-files.txt
+          grep -Fxq 'insatll.sh' baota-files.txt
+          grep -Fxq 'update.sh' baota-files.txt
+          grep -Fxq 'nginx.rewrite' baota-files.txt
+          grep -Fxq 'docker-compose.yml' baota-files.txt
+          ! grep -Eq '^\.github/' baota-files.txt
       - name: Publish or refresh GitHub Release
+        if: github.ref_name == 'work/zonoe-download-v1'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.meta.outputs.version }}
@@ -127,6 +160,8 @@ jobs:
           ASSETS=(
             dist-release/zonoe-ipa-download.tar.gz
             dist-release/zonoe-ipa-download.tar.gz.sha256
+            dist-release/zonoe-ipa-download-${VERSION}-baota.zip
+            dist-release/zonoe-ipa-download-${VERSION}-baota.zip.sha256
             install-online.sh
             install-local.sh
           )
@@ -140,19 +175,22 @@ jobs:
               --notes-file CHANGELOG.md
           fi
           gh release view "$TAG" --json tagName,isDraft,isPrerelease,url
-      - name: Upload CI deployment package
+      - name: Upload CI deployment packages
         uses: actions/upload-artifact@v4
         with:
-          name: zonoe-ipa-download-${{ steps.meta.outputs.version }}
+          name: zonoe-ipa-download-${{ steps.meta.outputs.version }}-${{ github.ref_name }}
           path: |
             dist-release/zonoe-ipa-download.tar.gz
             dist-release/zonoe-ipa-download.tar.gz.sha256
+            dist-release/zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota.zip
+            dist-release/zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota.zip.sha256
             install-online.sh
             install-local.sh
           if-no-files-found: error
           retention-days: 30
 
   release-e2e:
+    if: github.ref_name == 'work/zonoe-download-v1'
     needs: package-and-release
     runs-on: ubuntu-24.04
     steps:
@@ -161,6 +199,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.package-and-release.outputs.tag }}
+          VERSION: ${{ needs.package-and-release.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -168,6 +207,8 @@ jobs:
           cd /tmp/zonoe-release-check
           gh release download "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern 'zonoe-ipa-download.tar.gz*'
+            --pattern 'zonoe-ipa-download*'
           sha256sum -c zonoe-ipa-download.tar.gz.sha256
+          sha256sum -c "zonoe-ipa-download-${VERSION}-baota.zip.sha256"
           tar -tzf zonoe-ipa-download.tar.gz >/dev/null
+          unzip -t "zonoe-ipa-download-${VERSION}-baota.zip" >/dev/null
