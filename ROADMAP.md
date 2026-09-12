@@ -6,16 +6,14 @@
 - 版本：`2026091208`
 - Branch：`feature/baota-native-deploy-v1`
 - 最终实现 Commit：`d5c2bfe4f1d9ccf92b7f24a97e52cc312da3c9c9`
-- CI：Run `34717796655`，结果 `success`
-- Artifact：`zonoe-ipa-download-2026091208-baota-native-build`
-- Native ZIP SHA256：`16b35ea0c67519382a471603044f7f62777690e127f3d41fb605ed92fbe83cf9`
-- 当前状态：后台在线更新 UI、API、root updater worker、现有备份/回滚链路均已完成并 CI Green；等待真实宝塔后台按钮 E2E。
+- CI：当前分支实现与部署包合同均为 Green；精确 Run/Artifact/SHA256 以当前 HEAD 对应的 GitHub Actions Artifact 为准，不在包内文档自引用哈希。
+- 当前状态：后台在线更新 UI、API、root updater worker、备份/回滚链路均已完成；等待真实宝塔后台按钮 E2E。
 
 ## 1208 目标
 
 将 1207 的命令行 GitHub 更新能力真正放进后台管理：管理员登录后进入“在线更新”，即可检查当前/最新版本、查看 Release 说明并点击更新。
 
-安全边界保持不变：`zonoe-api` 仍以低权限 `zonoe` 用户运行，不允许 Web 进程直接以 root 执行任意命令。后台只写入一个固定格式的更新请求；root `zonoe-updater.path/service` 只调用受控的 `scripts/admin-update-worker.sh`，最终复用 `update.sh` 的 GitHub 下载、SHA256 校验、备份、安装和回滚。
+安全边界保持不变：`zonoe-api` 仍以低权限 `zonoe` 用户运行，不允许 Web 进程直接以 root 执行任意命令。后台只写入固定格式更新请求；root `zonoe-updater.path/service` 只调用受控 `scripts/admin-update-worker.sh`，最终复用 `update.sh` 的 GitHub 下载、SHA256 校验、备份、安装和回滚。
 
 ## 已完成
 
@@ -35,7 +33,7 @@
 | 本地版本高于 Stable 时禁止降级 | Done |
 | Production Build / API / frontend smoke | Done |
 | GitHub updater contract | Done |
-| 1208 Native ZIP 校验 | Done |
+| Native ZIP package validation | Done |
 
 ## 下一步
 

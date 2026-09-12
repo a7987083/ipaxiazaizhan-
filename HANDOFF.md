@@ -5,12 +5,9 @@
 - Repository: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
 - Version: `2026091208`
-- Implementation: `09d47d6d1c21ca2adc4b9ea90c089d089a131d8d`
-- Final hardening commit: `d5c2bfe4f1d9ccf92b7f24a97e52cc312da3c9c9`
-- CI Run: `34717796655` success
-- Artifact: `zonoe-ipa-download-2026091208-baota-native-build`
-- Artifact ID: `10305745680`
-- Native ZIP SHA256: `16b35ea0c67519382a471603044f7f62777690e127f3d41fb605ed92fbe83cf9`
+- Initial admin updater commit: `09d47d6d1c21ca2adc4b9ea90c089d089a131d8d`
+- Final forward-only hardening: `d5c2bfe4f1d9ccf92b7f24a97e52cc312da3c9c9`
+- CI: current branch implementation/package contracts are Green; use the current HEAD GitHub Actions artifact for exact Run/Artifact/SHA256.
 - Current Phase: `Phase 1.4 — BaoTa Native Admin Online Update`
 
 ## Runtime Architecture

@@ -4,8 +4,8 @@
 
 - 状态：Open / CI Green
 - 版本：`2026091208`
-- CI Run：`34717796655` success。
-- 已验证：代码构建、API smoke、前端 smoke、Shell、BaoTa contract、GitHub updater contract、部署包完整性。
+- CI 已验证：代码构建、API smoke、前端 smoke、Shell、BaoTa contract、GitHub updater contract、部署包完整性。
+- 精确 Run/Artifact/SHA256 以当前分支 HEAD 的 GitHub Actions Artifact 为准，不在包内文档自引用。
 - 尚未验证：真实宝塔上从后台点击“在线更新”后，systemd path/worker、备份、GitHub 下载、部署、API 重启、最终 success 状态完整走通。
 - 关闭条件：真实站点从一个较低 Stable 通过后台按钮成功升级到较高 Stable。
 

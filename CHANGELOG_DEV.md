@@ -15,13 +15,10 @@
 - worker 复用 1207 的 `update.sh` / `install-online.sh` / `scripts/lib-deploy.sh`，因此继续拥有 SHA256 校验、数据库/程序/前端备份和失败回滚。
 - 后台更新被限制为 forward-only：本地开发/预览版高于公开 Stable 时只显示状态，不允许通过 Web 强制降级。
 - `VERSION`：`2026091207` -> `2026091208`。
-- Implementation Commit：`09d47d6d1c21ca2adc4b9ea90c089d089a131d8d`。
-- Forward-only hardening commits：`07bfe8dd0a1b129c2177018a5707ad9b573a85ed`、`d5c2bfe4f1d9ccf92b7f24a97e52cc312da3c9c9`。
-- GitHub Actions Run：`34717796655`，结果 `success`。
-- Artifact ID：`10305745680`。
-- Native ZIP SHA256：`16b35ea0c67519382a471603044f7f62777690e127f3d41fb605ed92fbe83cf9`。
-- Generic TAR SHA256：`ee1d122b48a14dd77a0d59377d613a4d2c64c82fc164a1af61f298bde08c9ef4`。
-- 下载 CI Artifact 后再次执行 `sha256sum -c`、`unzip -t`，均通过；Native ZIP 已确认包含 updater worker、systemd installer、Admin UI 和 update service。
+- Initial admin updater commit：`09d47d6d1c21ca2adc4b9ea90c089d089a131d8d`。
+- Forward-only hardening：`07bfe8dd0a1b129c2177018a5707ad9b573a85ed`、`d5c2bfe4f1d9ccf92b7f24a97e52cc312da3c9c9`。
+- CI 增加后台 updater 脚本、API/UI、Native ZIP 文件合同校验。
+- 当前分支 CI Green；精确 Run、Artifact ID 和 SHA256 由 GitHub Actions 当前 HEAD 生成，不写回包内文档以避免自引用改变包哈希。
 - 尚未标记 1208 Production Verified：真实服务器当前最后完整运行验证基线仍是 1206；1208 后台按钮 E2E 待做。
 
 ## 2026-09-13 — 2026091207 安装器加固与 GitHub 命令行在线更新
@@ -32,13 +29,11 @@
 - `/healthz` 改为读取根 `VERSION`。
 - `update.sh`/`install-online.sh` 支持 GitHub Stable、Tag、Branch/Ref 更新。
 - 更新前自动备份程序、前端和数据库；失败尝试回滚。
-- CI Run `34716750221` success。
 
 ## 2026-09-13 — 2026091206 真实宝塔运行验证
 
 - 真实站点 `https://ios.zonoeios.xyz` 的 systemd API、本机 PostgreSQL、首页、Assets、公开 API、HTTPS 均验证通过。
 - 修复登录/Admin 的前端运行时崩溃，移除该路径上的 `useNavigate()`，改用浏览器原生跳转。
-- CI Run `34710236163` success。
 
 ## 历史
 
