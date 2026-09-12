@@ -110,10 +110,11 @@ jobs:
           set -euo pipefail
           cd dist-release
           sha256sum -c zonoe-ipa-download.tar.gz.sha256
-          tar -tzf zonoe-ipa-download.tar.gz >/dev/null
-          tar -tzf zonoe-ipa-download.tar.gz | grep -q './docker-compose.yml'
-          tar -tzf zonoe-ipa-download.tar.gz | grep -q './install-local.sh'
-          tar -tzf zonoe-ipa-download.tar.gz | grep -q './install-online.sh'
+          tar -tzf zonoe-ipa-download.tar.gz > package-files.txt
+          grep -Fxq './docker-compose.yml' package-files.txt
+          grep -Fxq './install-local.sh' package-files.txt
+          grep -Fxq './install-online.sh' package-files.txt
+          ! grep -Fq './.github/workflows/bootstrap-v2.yml' package-files.txt
       - name: Publish or refresh GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
