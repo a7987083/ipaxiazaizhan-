@@ -1,0 +1,172 @@
+name: ZONOE IPA Download CI Release
+
+on:
+  push:
+    branches:
+      - work/zonoe-download-v1
+    paths:
+      - 'VERSION'
+      - 'apps/**'
+      - 'deploy/**'
+      - 'scripts/**'
+      - 'install-local.sh'
+      - 'install-online.sh'
+      - 'docker-compose*.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.env.example'
+      - '.github/workflows/ci-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zonoe-ipa-download-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: zonoe_test
+          POSTGRES_USER: zonoe
+          POSTGRES_PASSWORD: zonoe_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zonoe -d zonoe_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://zonoe:zonoe_test_password@127.0.0.1:5432/zonoe_test
+      JWT_SECRET: test-jwt-secret-at-least-thirty-two-characters
+      IP_HASH_SALT: test-ip-hash-salt-value
+      SOURCE_CONFIG_KEY: test-source-config-encryption-key
+      PUBLIC_BASE_URL: http://localhost
+      FRONTEND_ORIGIN: http://localhost:5173
+      LOCAL_STORAGE_DIR: /tmp/zonoe-test-uploads
+      COOKIE_SECURE: 'false'
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: TestPassword123!
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Database migrations
+        run: npm run migrate -w apps/api
+      - name: Integration tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Shell validation
+        run: |
+          bash -n install-local.sh
+          bash -n install-online.sh
+          bash -n scripts/build-release.sh
+          bash -n scripts/lib-deploy.sh
+          bash -n scripts/smoke.sh
+          bash -n scripts/backup.sh
+      - name: Compose validation
+        run: |
+          cp .env.example .env
+          sed -i 's/CHANGE_ME_DB_PASSWORD/ci-db-password/g; s/CHANGE_ME_TO_AT_LEAST_32_RANDOM_CHARACTERS/ci-jwt-secret-at-least-32-characters/g; s/CHANGE_ME_TO_RANDOM_SALT/ci-ip-hash-salt/g; s/CHANGE_ME_TO_32_BYTE_SECRET_MATERIAL/ci-source-config-key-32-bytes/g; s/CHANGE_ME_ADMIN_PASSWORD/TestPassword123!/g' .env
+          docker compose config >/dev/null
+      - name: Docker image build
+        run: docker compose build api web
+
+  package-and-release:
+    needs: validate
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        name: Validate release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '\r\n ' < VERSION)"
+          [[ "$VERSION" =~ ^20[0-9]{8,12}$ ]]
+          TAG="download-v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Build local deployment package
+        run: ./scripts/build-release.sh "$PWD/dist-release"
+      - name: Validate package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist-release
+          sha256sum -c zonoe-ipa-download.tar.gz.sha256
+          tar -tzf zonoe-ipa-download.tar.gz >/dev/null
+          tar -tzf zonoe-ipa-download.tar.gz | grep -q './docker-compose.yml'
+          tar -tzf zonoe-ipa-download.tar.gz | grep -q './install-local.sh'
+          tar -tzf zonoe-ipa-download.tar.gz | grep -q './install-online.sh'
+      - name: Publish or refresh GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TITLE="ZONOE IPA Download ${VERSION}"
+          ASSETS=(
+            dist-release/zonoe-ipa-download.tar.gz
+            dist-release/zonoe-ipa-download.tar.gz.sha256
+            install-online.sh
+            install-local.sh
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+            gh release edit "$TAG" --target "$GITHUB_SHA" --title "$TITLE" --notes-file CHANGELOG.md
+          else
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "$TITLE" \
+              --notes-file CHANGELOG.md
+          fi
+          gh release view "$TAG" --json tagName,isDraft,isPrerelease,url
+      - name: Upload CI deployment package
+        uses: actions/upload-artifact@v4
+        with:
+          name: zonoe-ipa-download-${{ steps.meta.outputs.version }}
+          path: |
+            dist-release/zonoe-ipa-download.tar.gz
+            dist-release/zonoe-ipa-download.tar.gz.sha256
+            install-online.sh
+            install-local.sh
+          if-no-files-found: error
+          retention-days: 30
+
+  release-e2e:
+    needs: package-and-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify published GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.package-and-release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/zonoe-release-check
+          cd /tmp/zonoe-release-check
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'zonoe-ipa-download.tar.gz*'
+          sha256sum -c zonoe-ipa-download.tar.gz.sha256
+          tar -tzf zonoe-ipa-download.tar.gz >/dev/null
