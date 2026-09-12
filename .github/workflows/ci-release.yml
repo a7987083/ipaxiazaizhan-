@@ -25,6 +25,11 @@ on:
       - '.env.example'
       - '.env.docker.example'
       - 'DEPLOY.md'
+      - 'PROJECT_STATE.json'
+      - 'ROADMAP.md'
+      - 'CHANGELOG_DEV.md'
+      - 'HANDOFF.md'
+      - 'KNOWN_ISSUES.md'
       - '.github/workflows/ci-release.yml'
   workflow_dispatch:
 
@@ -128,6 +133,8 @@ jobs:
           bash -n scripts/smoke.sh
           bash -n scripts/backup.sh
           bash -n scripts/enable-https.sh
+          bash -n scripts/admin-update-worker.sh
+          bash -n scripts/install-admin-updater.sh
           bash update.sh --help >/tmp/update-help.txt
           grep -Fq 'GitHub 在线更新' /tmp/update-help.txt
       - name: BaoTa native contract
@@ -161,6 +168,12 @@ jobs:
           grep -Fq -- "--exclude='public/'" scripts/lib-deploy.sh
           grep -Fq -- "--exclude='.user.ini'" scripts/lib-deploy.sh
           grep -Fq 'zipfile.is_zipfile' scripts/lib-deploy.sh
+          grep -Fq "['update','在线更新']" apps/web/src/pages/Admin.jsx
+          grep -Fq "r.get('/system/update'" apps/api/src/routes/admin.js
+          grep -Fq "r.post('/system/update'" apps/api/src/routes/admin.js
+          grep -Fq 'forward-only' apps/api/src/services/updateService.js
+          grep -Fq 'zonoe-updater.path' scripts/install-admin-updater.sh
+          grep -Fq 'admin-update-request.json' scripts/admin-update-worker.sh
       - name: Legacy Docker compose syntax
         shell: bash
         run: |
@@ -204,12 +217,17 @@ jobs:
           grep -Fxq './auto_install.json' package-files.txt
           grep -Fxq './install.sh' package-files.txt
           grep -Fxq './scripts/native-install.sh' package-files.txt
+          grep -Fxq './scripts/admin-update-worker.sh' package-files.txt
+          grep -Fxq './scripts/install-admin-updater.sh' package-files.txt
           grep -Fxq './nginx.rewrite' package-files.txt
           grep -Fxq './public/index.html' package-files.txt
           unzip -Z1 "$NATIVE_ZIP" > baota-files.txt
           grep -Fxq 'auto_install.json' baota-files.txt
           grep -Fxq 'install.sh' baota-files.txt
           grep -Fxq 'scripts/native-install.sh' baota-files.txt
+          grep -Fxq 'scripts/admin-update-worker.sh' baota-files.txt
+          grep -Fxq 'scripts/install-admin-updater.sh' baota-files.txt
+          grep -Fxq 'apps/api/src/services/updateService.js' baota-files.txt
           grep -Fxq 'insatll.sh' baota-files.txt
           grep -Fxq 'update.sh' baota-files.txt
           grep -Fxq 'install-online.sh' baota-files.txt
