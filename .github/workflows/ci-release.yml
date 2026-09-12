@@ -178,7 +178,7 @@ jobs:
       - name: Upload CI deployment packages
         uses: actions/upload-artifact@v4
         with:
-          name: zonoe-ipa-download-${{ steps.meta.outputs.version }}-${{ github.ref_name }}
+          name: zonoe-ipa-download-${{ steps.meta.outputs.version }}-baota-build
           path: |
             dist-release/zonoe-ipa-download.tar.gz
             dist-release/zonoe-ipa-download.tar.gz.sha256
