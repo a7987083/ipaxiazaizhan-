@@ -54,6 +54,8 @@ jobs:
           tar -xzf /tmp/zonoe-source.tar.gz -C .
           rm -rf .bootstrap
           rm -f .github/workflows/bootstrap-v2.yml
+      - name: Apply PostgreSQL parameter fix
+        run: sed -i "s/CASE WHEN \\$9='published'/CASE WHEN \\$9::text='published'/" apps/api/src/repositories/appRepository.js
       - name: Install dependencies
         run: npm install
       - name: Database migrations
