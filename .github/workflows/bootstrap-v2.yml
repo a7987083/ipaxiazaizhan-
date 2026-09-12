@@ -54,13 +54,32 @@ jobs:
           tar -xzf /tmp/zonoe-source.tar.gz -C .
           rm -rf .bootstrap
           rm -f .github/workflows/bootstrap-v2.yml
-      - name: Apply PostgreSQL parameter fix
+      - name: Apply PostgreSQL createApp fix
         shell: bash
         run: |
-          sed -i "s/\([$]8\),\([$]9\),\([$]10\)/\1,\2::varchar,\3/" apps/api/src/repositories/appRepository.js
-          sed -i "s/CASE WHEN \([$]9\)=/CASE WHEN \1::varchar=/" apps/api/src/repositories/appRepository.js
-          grep -Fq "[$]9::varchar,[$]10" apps/api/src/repositories/appRepository.js
-          grep -Fq "CASE WHEN [$]9::varchar='published'" apps/api/src/repositories/appRepository.js
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('apps/api/src/repositories/appRepository.js')
+          s=p.read_text()
+          start=s.index('export async function createApp(data) {')
+          end=s.index('export async function updateApp', start)
+          replacement="""export async function createApp(data) {
+            return tx(async c=>{
+              const status=data.status||'draft';
+              const publishedAt=status==='published' ? new Date() : null;
+              const r=await c.query(`INSERT INTO apps(name,slug,bundle_id,icon_url,short_description,description,developer,category_id,status,featured,hot,sort_order,published_at)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+                [data.name,data.slug,data.bundleId,data.iconUrl||null,data.shortDescription||null,data.description||null,data.developer||null,data.categoryId||null,status,!!data.featured,!!data.hot,data.sortOrder||0,publishedAt]);
+              if(data.tagIds?.length) await setTagsWithClient(c,r.rows[0].id,data.tagIds);
+              if(data.screenshots?.length) await replaceScreenshotsWithClient(c,r.rows[0].id,data.screenshots);
+              return r.rows[0];
+            });
+          }
+
+          """
+          p.write_text(s[:start]+replacement+s[end:])
+          PY
+          node --check apps/api/src/repositories/appRepository.js
       - name: Install dependencies
         run: npm install
       - name: Database migrations
