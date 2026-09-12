@@ -147,6 +147,8 @@ UNIT
 
 start_application(){
   log "初始化本地控制数据（管理员/设置/软件源配置）"; (cd "$ROOT"&&node apps/api/src/db/migrate.js); (cd "$ROOT"&&node apps/api/src/db/seed.js)
+  # migrate/seed 由 root 执行，首次创建的 0600 控制文件必须在服务启动前交还给 zonoe。
+  chown -R "$RUNTIME_USER:$RUNTIME_USER" "$ROOT/data"
   systemctl enable --now "$SERVICE_NAME"; systemctl restart "$SERVICE_NAME"
   local ok=0; for _ in $(seq 1 40); do curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1&&ok=1&&break; sleep 1; done
   if [[ "$ok" != 1 ]]; then journalctl -u "$SERVICE_NAME" -n 80 --no-pager||true; die "API 健康检查失败"; fi

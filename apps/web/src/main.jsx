@@ -8,6 +8,7 @@ import AppDetail from './pages/AppDetail';
 import Login from './pages/Login';
 import Admin from './pages/Admin';
 import './styles.css';
+import './admin-fixes.css';
 
 class FatalBoundary extends React.Component{
   constructor(props){super(props);this.state={error:null};}
@@ -29,7 +30,12 @@ createRoot(root).render(
       <Routes>
         <Route path="/login" element={<Login/>}/>
         <Route path="/admin" element={<Admin/>}/>
-        <Route path="*" element={<Layout><Routes><Route path="/" element={<Home/>}/><Route path="/apps" element={<Apps/>}/><Route path="/app/:id" element={<AppDetail/>}/></Routes></Layout>}/>
+        <Route element={<Layout/>}>
+          <Route index element={<Home/>}/>
+          <Route path="apps" element={<Apps/>}/>
+          <Route path="app/:id" element={<AppDetail/>}/>
+          <Route path="*" element={<Home/>}/>
+        </Route>
       </Routes>
     </BrowserRouter>
   </FatalBoundary>
