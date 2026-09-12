@@ -7,6 +7,12 @@ die(){ printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "缺少命令: $1"; }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p "$ROOT/data"
+LOG_FILE="$ROOT/data/install.log"
+touch "$LOG_FILE"
+chmod 600 "$LOG_FILE" || true
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 DOMAIN="${1:-}"
 DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"
 [[ -n "$DOMAIN" ]] || DOMAIN="localhost"
@@ -213,7 +219,9 @@ prepare_database(){
   if ! runuser -u postgres -- psql -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${POSTGRES_USER}'" | grep -q 1; then
     runuser -u postgres -- createuser "$POSTGRES_USER"
   fi
-  runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -v dbpass="$POSTGRES_PASSWORD" -c "ALTER ROLE \"${POSTGRES_USER}\" WITH LOGIN PASSWORD :'dbpass';" >/dev/null
+  runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -v role="$POSTGRES_USER" -v dbpass="$POSTGRES_PASSWORD" >/dev/null <<'SQL'
+ALTER ROLE :"role" WITH LOGIN PASSWORD :'dbpass';
+SQL
 
   if ! runuser -u postgres -- psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'" | grep -q 1; then
     runuser -u postgres -- createdb -O "$POSTGRES_USER" "$POSTGRES_DB"
@@ -325,6 +333,7 @@ main(){
   log "API: http://127.0.0.1:3000"
   log "后台: http://$DOMAIN/admin"
   log "管理员信息: $ROOT/data/install-info.txt"
+  log "安装日志: $LOG_FILE"
   log "宝塔网站运行目录必须设置为 /public，并加载 nginx.rewrite。"
 }
 
