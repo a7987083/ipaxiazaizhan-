@@ -1,0 +1,3 @@
+import { Link } from 'react-router-dom';
+const fmt=n=>!n?'—':n>1024**3?`${(n/1024**3).toFixed(1)} GB`:n>1024**2?`${(n/1024**2).toFixed(0)} MB`:`${Math.round(n/1024)} KB`;
+export default function AppCard({app}){return <article className="app-card"><Link to={`/app/${app.slug||app.id}`} className="app-main"><img className="app-icon" src={app.icon_url||'/placeholder.svg'} onError={e=>e.currentTarget.style.visibility='hidden'}/><div><h3>{app.name}</h3><div className="meta">v{app.version||'—'} · {fmt(Number(app.file_size||0))}</div><p>{app.short_description||app.bundle_id}</p></div></Link><a className="download-btn" href={`/download/${app.id}`}>下载</a></article>}
