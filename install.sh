@@ -4,7 +4,7 @@ set -Eeuo pipefail
 log(){ printf '\033[1;34m[ZONOE]\033[0m %s\n' "$*"; }
 warn(){ printf '\033[1;33m[WARN]\033[0m %s\n' "$*" >&2; }
 die(){ printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
-need(){ command -v "$1" >/dev/null 2>&1 || die "缺少命令: $1"; }
+need(){ command -v "$1" >/dev/null 2>&1 || die "缺少命�: $1"; }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$ROOT/data"
@@ -246,9 +246,17 @@ build_application(){
   (cd "$ROOT" && npm run build)
 
   [[ -f "$ROOT/apps/web/dist/index.html" ]] || die "前端构建产物缺少 index.html"
-  rm -rf "$ROOT/public"
   mkdir -p "$ROOT/public"
-  cp -a "$ROOT/apps/web/dist/." "$ROOT/public/"
+  log "同步前端静态文件（保留宝塔 .user.ini / .well-known）"
+  rsync -a --delete \
+    --exclude='.user.ini' \
+    --exclude='.well-known/' \
+    --exclude='files' \
+    "$ROOT/apps/web/dist/" "$ROOT/public/"
+  if [[ -L "$ROOT/public/files" || -e "$ROOT/public/files" ]]; then
+    command -v chattr >/dev/null 2>&1 && chattr -i "$ROOT/public/files" 2>/dev/null || true
+    rm -rf "$ROOT/public/files" || die "无法更新 public/files，请检查宝塔文件保护属性"
+  fi
   ln -s "$ROOT/data/uploads" "$ROOT/public/files"
 }
 
