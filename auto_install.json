@@ -7,10 +7,10 @@
     {"mode":755,"path":"/install-online.sh"}
   ],
   "success_url":"/",
-  "php_versions":"74,80,81,82,83,84",
+  "php_versions":"70,71,72,73,74,80,81,82,83,84",
   "db_config":"",
-  "admin_username":"admin",
-  "admin_password":"安装时随机生成，请查看安装日志或 data/install-info.txt",
+  "admin_username":"",
+  "admin_password":"",
   "run_path":"/",
   "remove_file":["/index.html","/404.html","/.user.ini"],
   "enable_functions":[]
