@@ -2,47 +2,48 @@
 
 > 仅记录开发过程中实际发生的变更。面向开发/接手，不替代正式 Release Changelog。
 
-## 2026-09-12
+## 2026-09-12 — 2026091202 白屏加固
 
-### 项目状态文档体系
+### 前端生产构建可复现
 
-- 新增 `ROADMAP.md`：记录当前阶段目标、范围、计划、状态与 Next Task。
-- 新增 `CHANGELOG_DEV.md`：记录实际开发变更。
-- 更新 `HANDOFF.md`：同步当前分支、CI、Artifact、部署上下文与接手注意事项。
-- 更新 `PROJECT_STATE.json`：同步机器可读的版本、Branch、实现 Commit、CI、阶段状态。
-- 新增 `KNOWN_ISSUES.md`：集中记录未解决问题与风险。
-- 本次仅调整项目治理/状态文档，不修改前端、API、数据库或部署运行逻辑。
+- `apps/web/Dockerfile` 改为读取仓库根 `package-lock.json`，使用 `npm ci --workspace=apps/web`，不再在部署服务器对 `latest` 依赖执行无锁 `npm install`。
+- `apps/api/Dockerfile` 同步改为根 lockfile + `npm ci --workspace=apps/api`。
+- 解决“CI 根目录构建通过，但服务器 Docker 构建可能安装不同依赖”的生产不可复现风险。
 
-### BaoTa 部署修复 — Commit `e9bb144a045bc51efbe74fa19f85f412878f09b0`
+### 白屏可诊断与健康检查
 
-- 调整 `auto_install.json` 的 PHP 版本声明。
-- 清空宝塔元数据中的固定管理员用户名/密码字段，避免与实际安装脚本随机生成凭据的逻辑冲突。
-- Commit message：`deploy: align BaoTa metadata with external PostgreSQL installer`。
-- GitHub Actions Run：`34689591609`，结果：`success`。
-- CI Artifact：`zonoe-ipa-download-2026091201-baota-build`。
+- `apps/web/index.html` 增加可见启动占位；静态资源失败或前端长时间未启动时显示错误，不再只呈现纯白页。
+- `apps/web/src/main.jsx` 增加顶层 Fatal Error Boundary，React 渲染异常会直接显示错误信息。
+- `scripts/smoke.sh` 增加首页 HTML 和实际 `/assets/*.js` 可达性检查。
+- `install.sh` 健康检查从仅验证 `/healthz` 升级为同时验证首页和构建后的 JS Asset。
+- `.github/workflows/ci-release.yml` 增加真实 Web Docker 镜像 Smoke：启动 Nginx Web 镜像，访问首页并请求实际 JS Asset。
 
-### BaoTa Artifact 命名修复 — Commit `d248f8d215b4f7123ec0e77806a185a10ab2f906`
+### Version / CI
 
-- 调整宝塔部署 Artifact 名称，使文件系统使用更稳定。
-- Commit message：`ci: use filesystem-safe BaoTa artifact name`。
+- `VERSION`：`2026091201` -> `2026091202`。
+- 主要实现 Commit：`8b099bda1bd0cf95e2570dffa7e664767753e346` — `fix: harden frontend boot and reproducible Docker builds`。
+- CI Harness 后续修复 Commit：`7f699cb50a1291afa7cf920818405abdc1d39049`、`a6c440cf829e74d5bf61a7207bf437ef47075f10`。
+- 最终 GitHub Actions Run：`34703730896`，结果：`success`。
+- `Frontend image smoke`：`success`。
+- `package-and-release`：`success`。
+- Artifact：`zonoe-ipa-download-2026091202-baota-build`。
+- 宝塔 ZIP SHA256：`333c9f70818f2606e000f9c4665cdf4c2ffda10a999be4507134f79e56f35963`。
 
-### BaoTa 一键部署与稳定更新链路 — Commit `cde23581e7e7152383b084a251bb205a9a65192b`
+### 当前结论
 
-- 新增宝塔一键部署包结构。
-- 新增 `auto_install.json`。
-- 新增 `install.sh`，保留 `insatll.sh` 兼容入口。
-- 新增 `nginx.rewrite`，把宝塔公网流量反代到 Docker 内部 Nginx。
-- Docker 内部 HTTP 设计为绑定 `127.0.0.1:18081`，避免与宝塔 80/443 冲突。
-- 增强在线更新、部署包构建与回滚相关逻辑。
-- Commit message：`deploy: add BaoTa one-click package and stable updater flow`。
+- 代码/镜像层面已经验证：Production Build、Docker Build、Web Nginx 首页、构建 JS Asset 均可访问。
+- 原真实环境“部署后纯白页”仍需使用 `2026091202` 在宝塔服务器重新部署确认后才能关闭。
+- 当前公开 Stable Release 仍是旧版本，`2026091202` 当前来源是成功 CI Artifact。
 
-### Release 校验修复 — Commit `6b7ff7e6aa2c626428c1a835e07eed2aedfe05e3`
+## 2026-09-12 — 项目状态文档体系
 
-- 修复 bootstrap 移除后的发布包校验逻辑。
-- Commit message：`ci: fix release package validation after bootstrap removal`。
+- 新增 `ROADMAP.md`、`CHANGELOG_DEV.md`、`KNOWN_ISSUES.md`。
+- 更新 `HANDOFF.md`、`PROJECT_STATE.json`。
 
-## 当前开发结论
+## 2026-09-12 — BaoTa 部署修复
 
-- 当前功能分支的 CI 已绿。
-- 当前公开 Stable Release `download-v2026091201` 仍指向较旧实现基线 `6b7ff7e...`，未包含后续 3 个宝塔部署修复提交。
-- 已收到一次“部署后页面空白”真实环境反馈，生产验证尚未闭环。
+- `e9bb144a045bc51efbe74fa19f85f412878f09b0`：`deploy: align BaoTa metadata with external PostgreSQL installer`。
+- Run `34689591609` success，Artifact：`zonoe-ipa-download-2026091201-baota-build`。
+- `d248f8d215b4f7123ec0e77806a185a10ab2f906`：修复宝塔 Artifact 文件名。
+- `cde23581e7e7152383b084a251bb205a9a65192b`：加入宝塔一键部署、`auto_install.json`、`install.sh`、`nginx.rewrite` 和稳定更新链路。
+- `6b7ff7e6aa2c626428c1a835e07eed2aedfe05e3`：修复 Release 包校验。

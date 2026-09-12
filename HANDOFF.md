@@ -4,102 +4,99 @@
 
 - Repository: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-oneclick-deploy-v1`
-- Version: `2026091201`
-- Implementation Commit: `e9bb144a045bc51efbe74fa19f85f412878f09b0`
-- Commit message: `deploy: align BaoTa metadata with external PostgreSQL installer`
+- Version: `2026091202`
+- Product Fix Commit: `8b099bda1bd0cf95e2570dffa7e664767753e346`
+- Current Branch HEAD / CI Commit: `a6c440cf829e74d5bf61a7207bf437ef47075f10`
 - Workflow: `.github/workflows/ci-release.yml`
-- Actions Run: `34689591609`
+- Actions Run: `34703730896`
 - CI Result: `success`
-- CI Artifact: `zonoe-ipa-download-2026091201-baota-build`
+- CI Artifact: `zonoe-ipa-download-2026091202-baota-build`
+- BaoTa ZIP SHA256: `333c9f70818f2606e000f9c4665cdf4c2ffda10a999be4507134f79e56f35963`
 - Current Phase: `Phase 1.1 — BaoTa Deployment Hardening & Production Verification`
 
 ## Current Context
 
-Phase 1 的前端、API、PostgreSQL、下载调度、后台、Docker、Nginx、安装/更新、备份回滚和 CI 已基本完成。
+Phase 1 的前端、API、PostgreSQL、下载调度、后台、Docker、Nginx、安装/更新、备份回滚已完成。用户曾在真实宝塔环境部署 `2026091201` 后反馈网页纯白，因此本轮优先加固前端生产构建和部署验证，不新增业务功能。
 
-最近一轮工作重点不是新增业务功能，而是让项目在宝塔环境稳定一键部署。当前功能分支已包含宝塔专用 `auto_install.json`、`install.sh`、`nginx.rewrite`，Docker 内部 Nginx 使用 `127.0.0.1:18081`，宝塔公网 Nginx 负责 80/443 并反代进入 Docker。
+`2026091202` 已修复一个重要的生产可复现性问题：旧 Web/API Dockerfile 使用工作区自身 `package.json` 执行 `npm install`，Web 依赖又使用 `latest`，导致服务器构建可能与 CI 根 lockfile 验证的依赖不同。现在 Web/API Docker 构建均使用仓库根 `package-lock.json` + `npm ci`。
 
-用户已在真实环境部署过一次，并反馈“页面空白”。因此当前状态不能标记为 production verified。需要优先完成真实环境定位与 Smoke Test。
+同时前端加入启动占位和 Fatal Error Boundary；安装健康检查与 CI Smoke 均会验证实际构建后的 `/assets/*.js`，避免“API 健康但前端坏掉”仍被判定部署成功。
 
-另一个关键上下文：当前公开 Stable Release `download-v2026091201` 仍指向旧 Commit `6b7ff7e6aa2c626428c1a835e07eed2aedfe05e3`，没有包含后续 3 个宝塔部署修复 Commit。最新成功 CI Artifact 来自当前功能分支，而不是公开 Stable Release。
+GitHub Actions Run `34703730896` 已验证：Integration Tests、Production Build、Docker Build、BaoTa Contract、Frontend Image Smoke、Deployment Package Validation 全部成功。
 
 ## Key Implementation
 
 ### Frontend
 
-- React + Vite。
-- Mobile First，同时适配 PC。
+- React + Vite，Mobile First + PC。
 - 路由：`/`、`/apps`、`/app/:id`、`/login`、`/admin`。
-- API 使用同源 `/api/v1/*`，不写死 API Host。
+- API 使用同源 `/api/v1/*`。
+- `index.html` 有启动 fallback；静态资源失败/启动超时会显示错误。
+- `main.jsx` 有顶层 Fatal Error Boundary。
 
 ### Backend
 
-- Node.js 22 + Express 5。
-- PostgreSQL 16。
+- Node.js 22 + Express 5 + PostgreSQL 16。
 - Redis 7 可选/辅助。
-- `/download/{appId}` 记录统计后跳转，不让 Node.js 中转 IPA 大文件。
-- Download Source 采用 adapter 模式，支持 Local / HTTP / OpenList / Cloud / CDN / S3 / OSS / R2 / Other。
+- `/download/{appId}` 记录统计后跳转，不由 Node.js 中转 IPA。
+- Download Source 保持 adapter-based。
 
 ### Deployment
 
-- Docker Compose 服务：PostgreSQL / Redis / API / Web / internal Nginx。
-- 宝塔模式：公网流量 -> 宝塔 Nginx -> `127.0.0.1:18081` -> Docker internal Nginx。
-- `install.sh` 自动生成 `.env`、随机 Secret、数据库密码、管理员密码，并执行 migration + seed。
-- 管理员凭据写入 `data/install-info.txt`。
-- 更新流程保留 `.env`、`data`、`backups`，更新前备份，失败尝试回滚。
+- Docker Compose：PostgreSQL / Redis / API / Web / internal Nginx。
+- 宝塔公网 Nginx -> `127.0.0.1:18081` -> Docker internal Nginx。
+- `install.sh` 生成 `.env`、随机 Secret、数据库密码、管理员密码并执行 migration + seed。
+- 健康检查要求 `/healthz`、首页 HTML、实际 JS Asset 全部可达。
+- 更新保留 `.env`、`data`、`backups`，失败尝试回滚。
 
 ## Critical Behavior Not To Break
 
 1. IPA 大文件不要通过 Node.js 代理传输。
 2. `/download/{appId}` 必须先记录统计，再返回跳转。
-3. Download Source 必须保持 adapter-based，不把 OpenList/Tianyi 特有逻辑硬编码进 App 主表。
-4. 手机端管理后台必须可独立使用。
-5. `.env`、`data/uploads`、`backups` 在线更新后必须保留。
+3. Download Source 保持 adapter-based。
+4. 手机端管理后台必须独立可用。
+5. `.env`、`data/uploads`、`backups` 更新后必须保留。
 6. 更新失败必须尽量回滚。
-7. 宝塔部署不能抢占面板 Nginx 的公网 80/443。
-8. CI green 不等于 production verified；必须有真实域名 Smoke Test。
+7. 宝塔部署不能抢占公网 80/443。
+8. Docker 构建必须继续使用根 `package-lock.json` + `npm ci`。
+9. CI 必须验证真实 Web 镜像首页及 JS Asset，而不只是 `vite build` 成功。
 
 ## Current Risks
 
-详见 `KNOWN_ISSUES.md`。当前最高优先级：
+详见 `KNOWN_ISSUES.md`：
 
-- P0：真实部署页面空白。
-- P0：Stable Release 落后于当前宝塔修复分支。
-- P1：`VERSION` 未随修复递增，存在同版本不同代码歧义。
-- P1：README/默认分支/在线安装入口尚未完全对齐。
+- P0：原白屏问题已在构建/诊断层加固，但等待真实宝塔服务器用 `2026091202` 复测后关闭。
+- P0：公开 Stable Release 仍落后；不要用旧 `releases/latest` 代替当前 CI Artifact。
+- P1：README / 默认分支 / 正式发布路径仍需统一。
 
-## Verification Commands
+## Real Server Verification
 
-在宝塔目标服务器优先执行：
+在新包部署后执行：
 
 ```bash
 docker compose ps
-curl -I http://127.0.0.1:18081/
-curl http://127.0.0.1:18081/healthz
-curl http://127.0.0.1:18081/api/v1/home
+curl -fsS http://127.0.0.1:18081/ | head
+curl -fsS http://127.0.0.1:18081/healthz
+curl -fsS http://127.0.0.1:18081/api/v1/home
+bash scripts/smoke.sh http://127.0.0.1:18081
 grep -R "127.0.0.1:18081" /www/server/panel/vhost/nginx/ 2>/dev/null
 ```
 
-浏览器同时检查：
-
-- HTML 是否正常返回。
-- `/assets/*.js`、`/assets/*.css` 是否 200。
-- Console 是否有 JS/MIME/CORS/404 错误。
-- `/api/v1/home` 是否正常。
+浏览器检查域名首页、`/assets/*.js`、`/api/v1/home`、`/admin`。
 
 ## Next Task
 
-**先解决宝塔真实部署空白页，不新增业务功能。**
+**使用 `zonoe-ipa-download-2026091202-baota.zip` 在真实宝塔环境做一次干净重部署。**
 
-完成白屏定位后：
+若首页正常：
 
-1. 修复并重新跑 `.github/workflows/ci-release.yml`。
-2. 提升 `VERSION`。
+1. 关闭白屏 P0。
+2. 将已验证代码进入正式发布分支。
 3. 发布新的 Stable Release。
-4. 用新 Release 做一次全新宝塔安装。
-5. 验证首页、静态资源、API、后台登录。
-6. 再从旧版本执行一次 `update.sh` 在线升级 E2E。
-7. 验证 `.env`、数据、备份和回滚行为。
+4. 验证从旧版执行 `update.sh` 的在线升级 E2E。
+5. 验证 HTTPS、Cookie Secure、备份与回滚。
+
+若仍异常：页面现在应显示“静态资源加载失败 / 页面脚本未完成启动 / 前端启动失败”等诊断信息；结合浏览器 Console 和服务器 Smoke 输出继续定位。
 
 ## Files To Read First When Taking Over
 
@@ -108,8 +105,10 @@ grep -R "127.0.0.1:18081" /www/server/panel/vhost/nginx/ 2>/dev/null
 3. `KNOWN_ISSUES.md`
 4. `CHANGELOG_DEV.md`
 5. `DEPLOY.md`
-6. `ARCHITECTURE.md`
-7. `.github/workflows/ci-release.yml`
-8. `install.sh`
-9. `nginx.rewrite`
-10. `docker-compose.yml`
+6. `.github/workflows/ci-release.yml`
+7. `apps/web/Dockerfile`
+8. `apps/web/index.html`
+9. `apps/web/src/main.jsx`
+10. `install.sh`
+11. `nginx.rewrite`
+12. `docker-compose.yml`
