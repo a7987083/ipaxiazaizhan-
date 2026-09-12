@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: write
-
+ workflows: write  # 新增此行，授权修改或创建工作流文件
 jobs:
   bootstrap:
     runs-on: ubuntu-24.04
