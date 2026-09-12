@@ -4,33 +4,30 @@
 
 - Repository: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
-- Version: `2026091203`
-- Implementation Commit: `69509692bfe3f47acbaa438ca74ae0a533f1b078`
-- Commit message: `deploy: add BaoTa native systemd deployment v2026091203`
+- Version: `2026091206`
+- Head Commit: `3affd73f34b8c362db843bd3a2ce88f0263ad777`
+- Commit message: `fix: harden login navigation and add route smoke v2026091206`
 - Workflow: `.github/workflows/ci-release.yml`
-- Actions Run: `34705642671`
+- Actions Run: `34710236163`
 - CI Result: `success`
-- CI Artifact: `zonoe-ipa-download-2026091203-baota-native-build`
-- Artifact ID: `10301544130`
-- BaoTa ZIP: `zonoe-ipa-download-2026091203-baota-native.zip`
-- BaoTa ZIP SHA256: `86916a73a8e6c57487a82b3aeb3e35de19dfb84c5ecbe0e62dc2568965b0352c`
+- CI Artifact: `zonoe-ipa-download-2026091206-baota-native-build`
+- Artifact ID: `10303390781`
+- Native ZIP: `zonoe-ipa-download-2026091206-baota-native.zip`
+- Native ZIP SHA256: `8ce7508929695647327e4672d151c3ddbd3b5214c769264091d274e880e908d5`
 - Current Phase: `Phase 1.2 — BaoTa Native Deployment & Docker Exit`
+- Real BaoTa runtime: verified
+- Clean fresh install from latest ZIP: not yet verified without manual PostgreSQL HBA adjustment
 
-## Current Context
-
-用户明确选择宝塔单机环境优先使用“非 Docker”部署。`2026091203` 因此将宝塔默认部署架构从 Docker Compose 改为原生模式。
-
-业务代码没有重写：React 前台、Node/Express API、PostgreSQL schema、下载源 adapter、下载统计与 `/download/{appId}` 302 行为继续保留。改变的是部署层。
-
-新的默认链路：
+## Current Architecture
 
 ```text
 Browser
-  ↓
+  ↓ HTTPS
 BaoTa Nginx
   ├─ /, /assets/*, /files/* -> <site>/public
   ├─ /api/*                 -> 127.0.0.1:3000
-  └─ /download/*            -> 127.0.0.1:3000
+  ├─ /download/*            -> 127.0.0.1:3000
+  └─ /healthz               -> 127.0.0.1:3000
 
 systemd: zonoe-api
   ↓
@@ -39,143 +36,109 @@ Node.js 22 + Express
 Local PostgreSQL
 ```
 
-不再需要 Docker Nginx、Web 容器、API 容器、PostgreSQL 容器或 Redis 容器。Redis 当前不是 API 运行硬依赖，Native 默认不安装。
+Default BaoTa deployment no longer needs Docker. Docker files remain only for compatibility/migration and are excluded from the Native BaoTa ZIP.
 
-## What Changed in 2026091203
+## Real Production Verification Completed
 
-### BaoTa / Nginx
+On the real BaoTa host the following were observed working:
 
-- `auto_install.json` 的 `run_path` 改为 `/public`。
-- `nginx.rewrite` 不再反代到 `127.0.0.1:18081`。
-- `/api/*`、`/download/*`、`/healthz` 直接代理 `127.0.0.1:3000`。
-- React 静态文件由宝塔 Nginx 直接提供。
-- `public/files` 是指向 `data/uploads` 的 symlink，IPA 仍由 Nginx 直接发送。
+- `zonoe-api.service` active/running.
+- Node API listening on `127.0.0.1:3000`.
+- local `/healthz` returns success.
+- local `/api/v1/home` returns settings/categories from PostgreSQL.
+- public HTTPS homepage returns 200.
+- public `/healthz` works through BaoTa Nginx.
+- public `/api/v1/home` works through BaoTa Nginx.
+- actual hashed JS asset returns 200 with immutable cache headers.
+- PostgreSQL migration and seed complete successfully.
+- `/login` works in the browser after the `2026091206` frontend hotfix.
 
-### API Process
+This is enough to mark the **running production architecture** as verified. It is not yet enough to claim that a completely fresh latest ZIP install is zero-touch, because the real host required a manual HBA compatibility step during installation.
 
-- API 增加 `HOST` 配置。
-- Native `.env` 使用 `HOST=127.0.0.1`。
-- `install.sh` 写入 `/etc/systemd/system/zonoe-api.service`。
-- 运行用户为专用系统用户 `zonoe`。
-- 日志使用 `journalctl -u zonoe-api`。
+## Real-Host Issues Found During Verification
 
-### PostgreSQL
+### 1. psql password variable expansion
 
-- Native 默认连接 `127.0.0.1:5432`。
-- `install.sh` 可安装/启动本机 PostgreSQL，并创建用户/数据库。
-- 若检测到旧 Docker PostgreSQL 容器：
-  1. 导出 SQL 到 `backups/native-migration-<timestamp>/database.sql`；
-  2. 保存旧 `.env`；
-  3. `docker compose down`，不删除 volume；
-  4. 建立本机数据库；
-  5. 本机数据库为空时恢复旧 SQL。
+Old installer SQL used a form that produced:
 
-### Build / Static Frontend
-
-- `npm ci` 使用根 `package-lock.json`。
-- `npm run build`。
-- `apps/web/dist` 复制到 `public/`。
-- 安装完成前检查 `public/index.html` 引用的实际 JS Asset 文件存在。
-
-### Update / Backup
-
-- `scripts/backup.sh` 使用本机 `pg_dump`。
-- `scripts/lib-deploy.sh` 支持 Native 更新与旧 Docker -> Native 切换。
-- 更新仍保留 `.env`、`data`、`backups`。
-- Docker 项目文件保留为兼容方案，但 Native ZIP 明确排除 Docker Compose、Dockerfile 和旧 deploy Nginx。
-
-### HTTPS
-
-宝塔启用证书后：
-
-```bash
-sudo bash scripts/enable-https.sh your.domain
+```text
+syntax error at or near ":"
+ALTER ROLE "zonoe" WITH LOGIN PASSWORD :'dbpass';
 ```
 
-会设置 HTTPS Base URL、Origin、Secure Cookie 并重启 API。
+Fixed by executing psql variable substitution through standard input.
 
-## CI Verification
+### 2. BaoTa protected `public/.user.ini`
 
-Run `34705642671` 已通过：
+BaoTa had immutable protection on `public/.user.ini`, so deleting all of `public/` failed even as root.
 
-- dependency install
-- migrations
-- integration tests
-- production build
-- Native API smoke
-- Native frontend static smoke
-- shell validation
-- BaoTa native contract
-- legacy Docker compose syntax
-- package build
-- package validation
-- artifact upload
+Installer now synchronizes `apps/web/dist/` with `rsync` and preserves `.user.ini` / `.well-known` instead of deleting the entire Web Root.
 
-本地进一步验证 Artifact：
+### 3. Unused pgcrypto dependency
 
-- Native ZIP SHA256：`86916a73a8e6c57487a82b3aeb3e35de19dfb84c5ecbe0e62dc2568965b0352c`
-- `sha256sum -c`：PASS
-- `unzip -t`：PASS
+`001_init.sql` contained `CREATE EXTENSION IF NOT EXISTS pgcrypto;`, but the schema did not use pgcrypto functions. BaoTa PostgreSQL did not ship `pgcrypto.control` at the expected path.
+
+The unused extension dependency has been removed.
+
+### 4. PostgreSQL ident authentication
+
+The real host's `pg_hba.conf` matched local TCP connections with `ident`, so Node password authentication failed even after the role password was correctly set.
+
+The production host was fixed with application-specific local rules for the `zonoe` database/user and PostgreSQL config reload.
+
+**Important:** this remediation is still manual in the current installer. Before calling the ZIP zero-touch, add narrow HBA compatibility handling to `install.sh` and test on a clean BaoTa host.
+
+### 5. `/login` runtime crash
+
+The public site and API worked, but `/login` hit the frontend FatalBoundary with `l is not a function`.
+
+`2026091206` removes `useNavigate()` from Login/Admin navigation paths and uses `window.location.assign()` instead. CI now includes route smoke coverage, and the real browser retest passed.
 
 ## Critical Behavior Not To Break
 
-1. IPA 大文件不能由 Node.js 中转。
-2. `/download/{appId}` 必须记录统计后跳转。
-3. Download Source 保持 adapter-based。
-4. 手机端管理后台保持可用。
-5. `.env`、`data/uploads`、`backups` 更新/迁移后必须保留。
-6. 旧 Docker 数据迁移前必须先导出数据库，且不要自动删除旧 Docker volume。
-7. Native API 只监听本机，不暴露公网 3000。
-8. 宝塔网站运行目录必须是 `/public`。
-9. CI green 不等于 production verified；真实服务器仍必须验证。
+1. IPA large files must not be proxied through Node.
+2. `/download/{appId}` must record statistics and then redirect.
+3. Download Source remains adapter-based.
+4. Mobile admin remains usable.
+5. `.env`, `data/uploads`, and `backups` must survive update/migration.
+6. Before Docker -> Native migration, export the database and never auto-delete old Docker volumes.
+7. Native API must listen only on localhost.
+8. BaoTa site Web Root must be `<site>/public`.
+9. Preserve BaoTa-managed `.user.ini` / `.well-known` when deploying frontend assets.
+10. Real runtime verification does not replace clean-install/update/migration verification.
 
-## Real Server Verification
+## Remaining Risks / Work
+
+- P0: automate the PostgreSQL HBA compatibility step in `install.sh`.
+- P0: run one completely clean Native ZIP install without manual edits.
+- P0: verify Docker -> Native migration using real old data.
+- P0: publish a new Stable Release only after those deployment tests.
+- P1: run online update E2E and rollback/backup verification.
+- P2: `/healthz` still reports hard-coded `2026091201`; change it to read `VERSION`.
+- P2: Docker compatibility files remain in the repository by design.
+
+## Current Server
+
+The currently running real site is functioning. Do not reinstall it merely to make documentation match the repository.
+
+If inspecting the existing host:
 
 ```bash
 systemctl status zonoe-api --no-pager
 journalctl -u zonoe-api -n 100 --no-pager
 curl -fsS http://127.0.0.1:3000/healthz
 curl -fsS http://127.0.0.1:3000/api/v1/home
-bash scripts/smoke.sh https://your.domain
 ```
 
-并确认：
-
-```bash
-readlink -f public/files
-```
-
-指向站点的 `data/uploads`。
-
-如果从旧 Docker 迁移：
-
-```bash
-ls -lah backups/native-migration-*
-docker compose ps
-```
-
-Docker 服务应停止，但旧 volume 暂时不要删除。
-
-## Current Risks
-
-详见 `KNOWN_ISSUES.md`。最高优先级：
-
-- Native 部署尚未在真实宝塔机器完成生产验证。
-- 旧 Docker -> 本机 PostgreSQL 自动迁移尚未经过真实数据验证。
-- 公开 Stable Release 仍是旧版。
-- 宝塔必须正确应用 `/public` 运行目录和 `nginx.rewrite`。
+Do not expose `.env` or `data/install-info.txt` contents publicly because they contain credentials/secrets.
 
 ## Next Task
 
-**在真实宝塔服务器安装/迁移 `2026091203` Native ZIP，验证首页、API、后台、数据与 HTTPS。**
-
-验证通过后：
-
-1. 更新 Production Verified 状态。
-2. 发布新的 Stable Release。
-3. 从旧 Stable 执行一次 `update.sh` E2E。
-4. 验证备份和失败回滚。
-5. 再决定是否逐步删除 Docker 兼容方案。
+1. Add safe app-specific `pg_hba.conf` compatibility handling to installer.
+2. Produce next Native build and perform one clean empty-site install.
+3. Verify real Docker -> Native migration and preserved uploads/data.
+4. Publish new Stable Release.
+5. Run old Stable -> new Stable `update.sh` E2E and rollback test.
 
 ## Files To Read First When Taking Over
 
