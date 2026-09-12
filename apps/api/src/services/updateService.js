@@ -76,6 +76,7 @@ export async function getOnlineUpdateStatus({checkRemote=true}={}) {
     currentVersion,
     latestVersion,
     hasUpdate: comparable ? Number(latestVersion) > Number(currentVersion) : false,
+    localAhead: comparable ? Number(currentVersion) > Number(latestVersion) : false,
     repository: REPO,
     channel: CHANNEL,
     release,
@@ -84,7 +85,7 @@ export async function getOnlineUpdateStatus({checkRemote=true}={}) {
   };
 }
 
-export async function queueOnlineUpdate({force=false, requestedBy='admin'}={}) {
+export async function queueOnlineUpdate({requestedBy='admin'}={}) {
   await fs.mkdir(RUNTIME_DIR, {recursive:true});
   const existing = await readJson(STATUS_FILE, null);
   if (existing?.state === 'running' || existing?.state === 'queued') {
@@ -105,7 +106,10 @@ export async function queueOnlineUpdate({force=false, requestedBy='admin'}={}) {
   const queued = {state:'queued', message:'更新任务已提交，等待系统更新服务执行', requestedAt:now, requestedBy};
   await fs.writeFile(STATUS_FILE, JSON.stringify(queued, null, 2)+'\n', {mode:0o640});
   try {
-    await fs.writeFile(REQUEST_FILE, JSON.stringify({force:Boolean(force), requestedBy, requestedAt:now}, null, 2)+'\n', {flag:'wx', mode:0o600});
+    // Admin-triggered updates are deliberately forward-only. The privileged worker
+    // never receives force=true from the web API, which prevents accidental downgrade
+    // when a development build is newer than the published Stable release.
+    await fs.writeFile(REQUEST_FILE, JSON.stringify({force:false, requestedBy, requestedAt:now}, null, 2)+'\n', {flag:'wx', mode:0o600});
   } catch (e) {
     await fs.writeFile(STATUS_FILE, JSON.stringify({state:'failed',message:'无法提交更新任务',finishedAt:new Date().toISOString()},null,2)+'\n', {mode:0o640}).catch(()=>{});
     throw e;
