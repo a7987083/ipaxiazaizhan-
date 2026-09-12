@@ -57,8 +57,10 @@ jobs:
       - name: Apply PostgreSQL parameter fix
         shell: bash
         run: |
-          sed -i "s/CASE WHEN \([$]9\)=/CASE WHEN \1::text=/" apps/api/src/repositories/appRepository.js
-          grep -Fq "::text='published'" apps/api/src/repositories/appRepository.js
+          sed -i "s/\([$]8\),\([$]9\),\([$]10\)/\1,\2::varchar,\3/" apps/api/src/repositories/appRepository.js
+          sed -i "s/CASE WHEN \([$]9\)=/CASE WHEN \1::varchar=/" apps/api/src/repositories/appRepository.js
+          grep -Fq "[$]9::varchar,[$]10" apps/api/src/repositories/appRepository.js
+          grep -Fq "CASE WHEN [$]9::varchar='published'" apps/api/src/repositories/appRepository.js
       - name: Install dependencies
         run: npm install
       - name: Database migrations
