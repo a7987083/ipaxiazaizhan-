@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - work/zonoe-download-v1
- paths:
+paths:
       - '.github/workflows/bootstrap-v2.yml'
 permissions:
   contents: write 
