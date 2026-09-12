@@ -1,7 +1,7 @@
-import {useEffect,useState} from 'react';import {Link,useNavigate} from 'react-router-dom';import {api} from '../lib/api';
+import {useEffect,useState} from 'react';import {Link} from 'react-router-dom';import {api} from '../lib/api';
 const emptyApp={name:'',slug:'',bundleId:'',iconUrl:'',shortDescription:'',description:'',developer:'',status:'draft',featured:false,hot:false,sortOrder:0};
-export default function Admin(){const nav=useNavigate();const[tab,setTab]=useState('dashboard'),[stats,setStats]=useState(null),[apps,setApps]=useState([]),[categories,setCategories]=useState([]),[sources,setSources]=useState([]),[form,setForm]=useState(null),[msg,setMsg]=useState('');
-const guard=p=>p.catch(e=>{if(/登录/.test(e.message))nav('/login');else setMsg(e.message)});
+export default function Admin(){const[tab,setTab]=useState('dashboard'),[stats,setStats]=useState(null),[apps,setApps]=useState([]),[categories,setCategories]=useState([]),[sources,setSources]=useState([]),[form,setForm]=useState(null),[msg,setMsg]=useState('');
+const guard=p=>p.catch(e=>{if(/登录/.test(e.message))window.location.assign('/login');else setMsg(e.message)});
 const refresh=()=>guard(Promise.all([api.admin('/statistics'),api.admin('/apps?pageSize=100'),api.admin('/categories'),api.admin('/sources')]).then(([s,a,c,d])=>{setStats(s.data);setApps(a.data);setCategories(c.data);setSources(d.data)}));
 useEffect(refresh,[]);
 const saveApp=async()=>{const body={...form,categoryId:form.categoryId?Number(form.categoryId):null};if(form.id)await api.admin(`/apps/${form.id}`,{method:'PUT',body:JSON.stringify(body)});else await api.admin('/apps',{method:'POST',body:JSON.stringify(body)});setForm(null);refresh()};
