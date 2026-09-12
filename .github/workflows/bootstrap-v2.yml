@@ -55,7 +55,10 @@ jobs:
           rm -rf .bootstrap
           rm -f .github/workflows/bootstrap-v2.yml
       - name: Apply PostgreSQL parameter fix
-        run: sed -i "s/CASE WHEN \\$9='published'/CASE WHEN \\$9::text='published'/" apps/api/src/repositories/appRepository.js
+        shell: bash
+        run: |
+          sed -i "s/CASE WHEN \([$]9\)=/CASE WHEN \1::text=/" apps/api/src/repositories/appRepository.js
+          grep -Fq "::text='published'" apps/api/src/repositories/appRepository.js
       - name: Install dependencies
         run: npm install
       - name: Database migrations
