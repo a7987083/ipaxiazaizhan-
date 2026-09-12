@@ -4,10 +4,10 @@ on:
   push:
     branches:
       - work/zonoe-download-v1
-
+ paths:
+      - '.github/workflows/bootstrap-v2.yml'
 permissions:
-  contents: write
- workflows: write  # 新增此行，授权修改或创建工作流文件
+  contents: write 
 jobs:
   bootstrap:
     runs-on: ubuntu-24.04
