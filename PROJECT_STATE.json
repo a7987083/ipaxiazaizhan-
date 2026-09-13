@@ -8,7 +8,7 @@
     "ci": "passed"
   },
   "phase": "Phase 1.7 Public IPA Metadata Discovery",
-  "phase_status": "implementation_complete_ci_pending",
+  "phase_status": "ci_passed_real_e2e_pending",
   "production_verified": false,
   "runtime": {
     "web": "BaoTa Nginx serves public/",
@@ -29,6 +29,7 @@
     "public_bundle_id_search": true,
     "public_ipa_status_filter": true,
     "public_target_ios_filter": true,
+    "stale_public_metadata_blocked": true,
     "duplicate_ipa_upload_disabled": true,
     "postgres_runtime_required": false
   },
@@ -36,14 +37,26 @@
     "baseline_2026091220_ci": "passed",
     "local_changed_api_node_syntax": "passed",
     "local_new_contract_test_node_syntax": "passed",
-    "ci_for_current_head": "pending",
+    "code_commit": "7f121393e3a3f04dbd9732b5d22eadcf701a64ca",
+    "github_actions_run": 34776313872,
+    "github_actions_run_number": 55,
+    "validate": "passed",
+    "integration_tests": "passed",
+    "production_build": "passed",
+    "native_api_smoke": "passed",
+    "native_frontend_smoke": "passed",
+    "baota_native_contract": "passed",
+    "mysql_multi_source_contract": "passed",
+    "github_updater_contract": "passed",
+    "deployment_package_build_and_validation": "passed",
     "real_baota_2026091221_e2e": "pending"
   },
-  "next_task": "Wait for current-head CI result, then deploy 2026091221 through the verified updater and validate Bundle ID search, IPA status filters and target-iOS compatibility against real parsed cache data.",
+  "next_task": "Deploy 2026091221 through the verified BaoTa online updater and validate Bundle ID search, IPA status filters, target-iOS compatibility, pagination totals and detail metadata against real parsed cache data.",
   "notes": [
     "2026091219 remains the last explicitly documented real BaoTa Native/online-update baseline.",
     "2026091221 does not change updater internals or IPA parsing transport; it consumes the existing v3 safe cache.",
     "Target-iOS compatibility is conservative: unknown, stale, pending or failed parse results are excluded because compatibility cannot be proven.",
+    "Stale-MD5 and failed parsed metadata is not exposed as current public Bundle ID/version/minimum-iOS data and cannot satisfy metadata search.",
     "Public APIs do not expose bt1a, OpenList tokens, raw_url, internal OpenList paths or parse-error text."
   ]
 }

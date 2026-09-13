@@ -3,19 +3,22 @@
 ## 2026-09-14 — 2026091221 Public IPA metadata discovery
 
 - 继续以 2026091220 / `7f48a23c50072fd8a15c50aef74631ca8007504f` 为功能基线，不修改已验证的 updater 和 IPA Range 解析机制。
-- 公共 App 搜索接入 OpenList v3 安全缓存，可按 IPA 包内名称、包内版本、Build、Bundle ID、最低 iOS、文件名和 Executable 命中；最终 App 行仍从原 MySQL `fa_category` 读取。
+- 公共 App 搜索接入 OpenList v3 安全缓存，可按当前 IPA 包内名称、包内版本、Build、Bundle ID、最低 iOS、文件名和 Executable 命中；最终 App 行仍从原 MySQL `fa_category` 读取。
 - `/api/v1/apps` 新增 `ipa=parsed|pending|failed` 和 `ios=<target>`；`ios` 表示 `MinimumOSVersion <= target`，只对当前 MD5 已解析数据判定，未知/过期/待解析/失败不猜测兼容。
 - 公共响应新增安全 `ipa_status`；详情保留 `source_file_size`，同时显示实际 OpenList IPA 大小。
 - 前台 App 列表增加 IPA 状态与目标 iOS 筛选；卡片显示包内版本/Build/最低 iOS；详情页把“IPA 已解析”和“MD5 已校验”拆开。
-- 新增 contract test 覆盖版本号数值比较、stale MD5 -> pending、Bundle ID/包内字段搜索、目标 iOS 兼容筛选和解析状态筛选。
+- 修正 stale-cache 边界：文件 MD5 变化或解析失败后，旧 Bundle ID/包内版本/最低 iOS 不再作为当前公开元数据返回，也不会被元数据搜索命中；状态仍显示 pending/failed。
+- 新增 contract test 覆盖版本号数值比较、stale MD5 -> pending、失败解析隔离、Bundle ID/包内字段搜索、目标 iOS 兼容筛选和解析状态筛选。
 - 同步更新 API 与长期项目状态文档。
 
 ### 验证状态
 
-- `apps/api/src/repositories/appRepository.js` 本地 `node --check` 通过。
-- 新 contract test 本地 `node --check` 通过。
-- 完整 Vitest、前端 Production build、BaoTa contract、部署包与当前 HEAD CI：提交后由 GitHub Actions 验证。
-- 真实 BaoTa 2026091221 E2E 待 CI 通过后执行。
+- 本地 `node --check`：修改后的 `appRepository.js` 和新增 contract test 均通过。
+- GitHub Actions #55，代码提交 `7f121393e3a3f04dbd9732b5d22eadcf701a64ca`：`validate` 成功。
+- Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract 均成功。
+- `package-and-release` 成功：当前前端/API 打包、release metadata、部署包构建/校验和 CI Artifact 上传均成功；GitHub Release 发布步骤按条件 skipped。
+- `release-e2e` 按现有 workflow 条件 skipped。
+- 真实 BaoTa 2026091221 E2E 尚未执行，因此当前状态是 **CI verified / runtime pending**。
 
 ## 2026-09-14 — 2026091220 IPA parse results explorer
 
@@ -30,7 +33,7 @@
 ### 验证状态
 
 - 本地 Node 语法检查通过（API service/routes/tests）。
-- GitHub Actions、部署包和 1219 → 1220 在线更新仍需以本提交后的 CI/真实服务器结果为准。
+- GitHub Actions #52 已通过；真实服务器结果仍以部署验证为准。
 
 ## 2026-09-13 — 2026091217 Online update canary
 
@@ -55,5 +58,4 @@
 ### 验证状态
 
 - 本地 Shell 语法、Node 语法、Workflow YAML 解析已通过。
-- 当前改动提交后的 GitHub Actions CI / Artifact 仍需以最新 HEAD 结果为准。
-- 真实宝塔多 MySQL 源和后台一键更新 E2E 在部署候选包后验证；在此之前不标记 Production Verified。
+- 真实宝塔多 MySQL 源和后台一键更新 E2E 以对应版本部署记录为准。
