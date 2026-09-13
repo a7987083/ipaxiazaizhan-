@@ -22,11 +22,16 @@ function cleanParsed(value={}){
 function validParsed(value){
   return Boolean(value&&typeof value==='object'&&Object.values(cleanParsed(value)).some(Boolean));
 }
+function normalizeSize(value){
+  const n=Number(value||0);
+  return Number.isFinite(n)&&n>0?Math.round(n):0;
+}
 function normalizeEntry(md5,value={}){
   md5=normalizeMd5(md5||value?.md5);
   if(!md5||!validParsed(value?.parsed))return null;
   return {
     md5,
+    size:normalizeSize(value?.size),
     parsed:cleanParsed(value.parsed),
     parsedAt:value?.parsedAt||null,
     firstSeenAt:value?.firstSeenAt||value?.parsedAt||null,
@@ -52,6 +57,7 @@ export function seedMetadataLibraryFromCache(library,cache){
     const old=out.entries[md5];
     out.entries[md5]={
       md5,
+      size:normalizeSize(file?.size)||old?.size||0,
       parsed:cleanParsed(file.parsed),
       parsedAt:file.parsedAt||old?.parsedAt||null,
       firstSeenAt:old?.firstSeenAt||file.parsedAt||null,
@@ -62,20 +68,24 @@ export function seedMetadataLibraryFromCache(library,cache){
   return out;
 }
 
-export function getParsedMetadataByMd5(library,md5){
+export function getParsedMetadataByMd5(library,md5,size=0){
   md5=normalizeMd5(md5);
   if(!md5)return null;
   const item=normalizeEntry(md5,library?.entries?.[md5]);
-  return item?{...item,parsed:{...item.parsed}}:null;
+  if(!item)return null;
+  const expectedSize=normalizeSize(size);
+  if(item.size&&expectedSize&&item.size!==expectedSize)return null;
+  return {...item,parsed:{...item.parsed}};
 }
 
-export function rememberParsedMetadata(library,{md5,parsed,parsedAt,source='range-parser'}={}){
+export function rememberParsedMetadata(library,{md5,size,parsed,parsedAt,source='range-parser'}={}){
   md5=normalizeMd5(md5);
   if(!md5||!validParsed(parsed))return library;
   const out=normalizeLibrary(library);
   const old=out.entries[md5];
   out.entries[md5]={
     md5,
+    size:normalizeSize(size)||old?.size||0,
     parsed:cleanParsed(parsed),
     parsedAt:parsedAt||old?.parsedAt||new Date().toISOString(),
     firstSeenAt:old?.firstSeenAt||parsedAt||new Date().toISOString(),
@@ -108,10 +118,8 @@ export async function writeIpaMetadataLibrary(value){
 export async function loadAndSeedIpaMetadataLibrary(cache){
   const current=await readIpaMetadataLibrary();
   const seeded=seedMetadataLibraryFromCache(current,cache);
-  if(Object.keys(seeded.entries).length!==Object.keys(current.entries).length){
-    return writeIpaMetadataLibrary(seeded);
-  }
-  return seeded;
+  const changed=JSON.stringify(seeded.entries)!==JSON.stringify(current.entries);
+  return changed?writeIpaMetadataLibrary(seeded):seeded;
 }
 
 export { normalizeMd5 };
