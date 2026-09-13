@@ -2,8 +2,9 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 async function request(path, options={}){
   const method=String(options.method||'GET').toUpperCase();
-  const retryAdminGet=method==='GET'&&String(path).startsWith('/api/v1/admin/');
-  const maxAttempts=retryAdminGet?31:1;
+  const isAdminGet=method==='GET'&&String(path).startsWith('/api/v1/admin/');
+  const isUpdateStatusGet=isAdminGet&&String(path).startsWith('/api/v1/admin/system/update');
+  const maxAttempts=isUpdateStatusGet?121:(isAdminGet?31:1);
   let lastError=null;
 
   for(let attempt=1;attempt<=maxAttempts;attempt++){
@@ -12,26 +13,24 @@ async function request(path, options={}){
       const text=await r.text(); let data=null;
       try{data=text?JSON.parse(text):null}catch{}
 
-      // During a native online update, zonoe-api is intentionally restarted.
-      // BaoTa/Nginx returns a non-JSON 502/503 in that short window. Treat it
-      // as transient for authenticated admin GET requests instead of surfacing
-      // a scary updater error immediately.
-      if(retryAdminGet&&(r.status===502||r.status===503)&&attempt<maxAttempts){
+      // Native updates intentionally restart zonoe-api. BaoTa/Nginx can return
+      // a temporary non-JSON 502/503 while the service is rebuilding/restarting.
+      // Keep retrying update-status GETs for up to ~4 minutes so the UI can stay
+      // on the same page and reconnect to the new API automatically.
+      if(isAdminGet&&(r.status===502||r.status===503)&&attempt<maxAttempts){
         await sleep(2000);
         continue;
       }
 
       if(!r.ok||!data?.ok){
         const transient=(r.status===502||r.status===503)&&text&&!data;
-        const message=data?.error?.message || (r.status===429?'请求过于频繁，请稍后再试':transient?`服务正在重启或 API 尚未恢复（HTTP ${r.status}）`:`HTTP ${r.status}${text&&!data?'（服务器返回了非 JSON 响应）':''}`);
+        const message=data?.error?.message || (r.status===429?'请求过于频繁，请稍后再试':transient?`服务正在更新/重启，暂时无法连接 API（HTTP ${r.status}）`:`HTTP ${r.status}${text&&!data?'（服务器返回了非 JSON 响应）':''}`);
         const e=new Error(message); e.status=r.status; e.code=data?.error?.code; throw e;
       }
       return data;
     }catch(e){
       lastError=e;
-      // A restart can also briefly produce a fetch/network error before Nginx
-      // answers again. Retry only idempotent admin GETs.
-      if(retryAdminGet&&attempt<maxAttempts&&(e instanceof TypeError||e?.status===502||e?.status===503)){
+      if(isAdminGet&&attempt<maxAttempts&&(e instanceof TypeError||e?.status===502||e?.status===503)){
         await sleep(2000);
         continue;
       }

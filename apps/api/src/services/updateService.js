@@ -63,16 +63,10 @@ async function fetchStable(currentVersion) {
   const latestVersion = versionFromRelease(release);
   if (!latestVersion) throw new Error('GitHub Stable Release 缺少可识别版本');
   return {
-    id:'stable',
-    label:'稳定版 Stable Release',
-    source:'release',
-    latestVersion,
-    ...compareVersion(currentVersion,latestVersion),
-    tag:release.tag_name || '',
-    name:release.name || release.tag_name || '',
-    notes:String(release.body || '').slice(0,8000),
-    url:release.html_url || '',
-    publishedAt:release.published_at || ''
+    id:'stable', label:'稳定版 Stable Release', source:'release', latestVersion,
+    ...compareVersion(currentVersion,latestVersion), tag:release.tag_name || '',
+    name:release.name || release.tag_name || '', notes:String(release.body || '').slice(0,8000),
+    url:release.html_url || '', publishedAt:release.published_at || ''
   };
 }
 async function versionAtRef(ref) {
@@ -88,18 +82,11 @@ async function fetchPreview(currentVersion) {
   if (!run) throw new Error('Preview 暂无通过 CI 的构建');
   const latestVersion = await versionAtRef(run.head_sha);
   return {
-    id:'preview',
-    label:'预览版 Preview',
-    source:'branch-ci',
-    branch:PREVIEW_REF,
-    ref:run.head_sha,
-    latestVersion,
-    ...compareVersion(currentVersion,latestVersion),
+    id:'preview', label:'预览版 Preview', source:'branch-ci', branch:PREVIEW_REF,
+    ref:run.head_sha, latestVersion, ...compareVersion(currentVersion,latestVersion),
     name:run.display_title || `Preview ${latestVersion}`,
-    notes:`来自 ${PREVIEW_REF} 最近一次通过 CI 的构建。`,
-    url:run.html_url || '',
-    publishedAt:run.updated_at || run.created_at || '',
-    workflowRunId:run.id
+    notes:`来自 ${PREVIEW_REF} 最近一次通过 CI 的构建。`, url:run.html_url || '',
+    publishedAt:run.updated_at || run.created_at || '', workflowRunId:run.id
   };
 }
 async function channelInfo(channel,currentVersion) {
@@ -111,21 +98,33 @@ async function channelInfo(channel,currentVersion) {
       label:channel==='preview'?'预览版 Preview':'稳定版 Stable Release',
       source:channel==='preview'?'branch-ci':'release',
       branch:channel==='preview'?PREVIEW_REF:undefined,
-      latestVersion:'',
-      hasUpdate:false,
-      localAhead:false,
+      latestVersion:'', hasUpdate:false, localAhead:false,
       error:e?.message || 'GitHub 检查失败'
     };
   }
+}
+function emptyChannel(id) {
+  return {id,label:id==='preview'?'预览版 Preview':'稳定版 Stable Release',source:id==='preview'?'branch-ci':'release',branch:id==='preview'?PREVIEW_REF:undefined,latestVersion:'',hasUpdate:false,localAhead:false};
 }
 
 export async function getOnlineUpdateStatus({checkRemote=true}={}) {
   await fs.mkdir(RUNTIME_DIR,{recursive:true});
   const currentVersion = await readText(VERSION_FILE,'unknown');
   const status = await readJson(STATUS_FILE,{state:'idle',message:'尚未执行后台更新'});
-  let stable={id:'stable',label:'稳定版 Stable Release',latestVersion:'',hasUpdate:false,localAhead:false};
-  let preview={id:'preview',label:'预览版 Preview',branch:PREVIEW_REF,latestVersion:'',hasUpdate:false,localAhead:false};
-  if (checkRemote) [stable,preview] = await Promise.all([channelInfo('stable',currentVersion),channelInfo('preview',currentVersion)]);
+  const busy = status?.state==='running' || status?.state==='queued';
+  let stable=emptyChannel('stable');
+  let preview=emptyChannel('preview');
+
+  // Polling the updater every 2.5s must not also hit GitHub every 2.5s. While an
+  // update is queued/running, return the pinned target from the local status file.
+  if (checkRemote && !busy) {
+    [stable,preview] = await Promise.all([channelInfo('stable',currentVersion),channelInfo('preview',currentVersion)]);
+  } else if (busy && ['stable','preview'].includes(status.channel)) {
+    const c=status.channel==='preview'?preview:stable;
+    c.latestVersion=String(status.targetVersion||'');
+    c.hasUpdate=true;
+  }
+
   return {
     currentVersion,
     repository:REPO,
@@ -164,22 +163,17 @@ export async function queueOnlineUpdate({requestedBy='admin',channel='stable'}={
 
   const now=new Date().toISOString();
   const queued={
-    state:'queued',
-    message:`已提交 ${target.label} 更新任务，等待系统更新服务执行`,
-    channel,
-    targetVersion:target.latestVersion,
-    requestedAt:now,
-    requestedBy
+    state:'queued', step:'queued', progress:0,
+    message:`[0%] 已提交 ${target.label} 更新任务，等待系统更新服务执行`,
+    channel, targetVersion:target.latestVersion, requestedAt:now, requestedBy
   };
   await fs.writeFile(STATUS_FILE,JSON.stringify(queued,null,2)+'\n',{mode:0o640});
   try {
-    // Web API only chooses one of two fixed channels. It never accepts arbitrary refs
-    // and never sets force=true, so the privileged worker remains forward-only.
     const request={channel,force:false,targetVersion:target.latestVersion,requestedBy,requestedAt:now};
     if (channel==='preview') request.ref=target.ref;
     await fs.writeFile(REQUEST_FILE,JSON.stringify(request,null,2)+'\n',{flag:'wx',mode:0o600});
   } catch (e) {
-    await fs.writeFile(STATUS_FILE,JSON.stringify({state:'failed',message:'无法提交更新任务',finishedAt:new Date().toISOString()},null,2)+'\n',{mode:0o640}).catch(()=>{});
+    await fs.writeFile(STATUS_FILE,JSON.stringify({state:'failed',step:'queue',progress:0,message:'无法提交更新任务',finishedAt:new Date().toISOString()},null,2)+'\n',{mode:0o640}).catch(()=>{});
     throw e;
   }
   return queued;

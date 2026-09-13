@@ -15,13 +15,17 @@ describe('dual-channel online updater contract',()=>{
     expect(s).toContain("status=success");
     expect(s).toContain("request.ref=target.ref");
     expect(s).toContain("force:false");
+    expect(s).toContain('checkRemote && !busy');
   });
 
-  test('root worker only accepts stable or preview and preview uses exact commit ref',()=>{
+  test('root worker only accepts stable or preview, uses exact preview ref, and publishes dynamic progress',()=>{
     const s=read('scripts/admin-update-worker.sh');
     expect(s).toContain('channel not in {"stable","preview"}');
     expect(s).toContain('/bin/bash "$ROOT/update.sh" --ref "$REF"');
     expect(s).toContain('/bin/bash "$ROOT/update.sh" --stable');
+    expect(s).toContain('progress_from_log');
+    expect(s).toContain('[100%] 在线更新完成');
+    expect(s).toContain('errorDetail');
     expect(s).not.toContain('--force >>');
   });
 
@@ -33,10 +37,20 @@ describe('dual-channel online updater contract',()=>{
     expect(s).toContain('JSON.stringify({channel})');
   });
 
-  test('deploy engine keeps automatic backup and rollback',()=>{
+  test('deploy engine preserves persistent control state and can roll back',()=>{
     const s=read('scripts/lib-deploy.sh');
     expect(s).toContain('backup_current');
     expect(s).toContain('restore_backup');
-    expect(s).toContain('部署失败，已尝试自动回滚');
+    expect(s).toContain('restore_persistent_state_after_install');
+    expect(s).toContain("--exclude='openlist-task.json'");
+    expect(s).toContain('merge_old_env_values');
+    expect(s).toContain('新版本启动后持久配置恢复/健康检查失败');
+  });
+
+  test('frontend treats updater 502/503 as a restart window instead of a final error',()=>{
+    const s=read('apps/web/src/lib/api.js');
+    expect(s).toContain('isUpdateStatusGet');
+    expect(s).toContain('121');
+    expect(s).toContain('服务正在更新/重启');
   });
 });
