@@ -5,9 +5,9 @@ import { asyncHandler,ok,AppError } from '../utils/http.js';
 import { csrfToken } from '../utils/crypto.js';
 import { login,changePassword } from '../services/authService.js';
 import { getOnlineUpdateStatus,queueOnlineUpdate } from '../services/updateService.js';
-import { getOpenListIpaStatus,syncOpenListIpaMetadata,testOpenListConnection } from '../services/openListMetadataService.js';
+import { getOpenListIpaStatus,queueOpenListIpaMetadata,testOpenListConnection,listMissingOpenListEntries,resetOpenListScheduler } from '../services/openListMetadataService.js';
 import { testMysqlSource } from '../services/mysqlCli.js';
-import { getMysqlSource,saveOpenListConfig } from '../storage/controlStore.js';
+import { getMysqlSource,saveOpenListConfig,saveOpenListSchedule } from '../storage/controlStore.js';
 import { loginLimiter } from '../middleware/rateLimit.js';
 import { requireAdmin,requireCsrf } from '../middleware/auth.js';
 import * as apps from '../repositories/appRepository.js';
@@ -70,14 +70,28 @@ r.put('/openlist',asyncHandler(async(req,res)=>{
   try { ok(res,await saveOpenListConfig(p)); }
   catch(e){ if(e?.code==='OPENLIST_TOKEN_REQUIRED') throw new AppError(400,'OPENLIST_TOKEN_REQUIRED',e.message); throw e; }
 }));
+r.put('/openlist/schedule',asyncHandler(async(req,res)=>{
+  const p=z.object({enabled:z.boolean(),intervalMinutes:z.coerce.number().int().min(5).max(1440),parseLimit:z.coerce.number().int().min(1).max(20)}).parse(req.body||{});
+  try { const out=await saveOpenListSchedule(p); resetOpenListScheduler(); ok(res,out.schedule); }
+  catch(e){ if(e?.code==='OPENLIST_CONFIG_REQUIRED') throw new AppError(400,'OPENLIST_CONFIG_REQUIRED',e.message); throw e; }
+}));
+r.get('/openlist/missing',asyncHandler(async(req,res)=>{
+  const p=z.object({page:z.coerce.number().int().min(1).default(1),pageSize:z.coerce.number().int().min(1).max(200).default(100),q:z.string().optional().default('')}).parse(req.query||{});
+  const x=await listMissingOpenListEntries(p); ok(res,x.items,{total:x.total,page:x.page,pageSize:x.pageSize,uniqueMissingFiles:x.uniqueMissingFiles});
+}));
 r.post('/openlist/test',asyncHandler(async(_req,res)=>{
   try { ok(res,await testOpenListConnection()); }
   catch(e){ throw new AppError(502,'OPENLIST_CONNECT_FAILED',`OpenList 连接失败：${e.message}`); }
 }));
 r.post('/openlist/sync',asyncHandler(async(req,res)=>{
-  const p=z.object({parseLimit:z.coerce.number().int().min(0).max(20).default(0)}).parse(req.body||{});
-  try { ok(res,await syncOpenListIpaMetadata({parseLimit:p.parseLimit})); }
-  catch(e){ throw new AppError(502,'OPENLIST_SYNC_FAILED',`OpenList 同步失败：${e.message}`); }
+  const p=z.object({parseLimit:z.coerce.number().int().min(0).max(20).default(0),forceListRefresh:z.boolean().optional().default(false)}).parse(req.body||{});
+  try { ok(res,await queueOpenListIpaMetadata({parseLimit:p.parseLimit,forceListRefresh:p.forceListRefresh,trigger:'manual'})); }
+  catch(e){
+    if(e?.code==='OPENLIST_TASK_BUSY') throw new AppError(409,'OPENLIST_TASK_BUSY',e.message);
+    if(e?.code==='OPENLIST_CONFIG_REQUIRED') throw new AppError(400,'OPENLIST_CONFIG_REQUIRED',e.message);
+    if(e?.code==='OPENLIST_DISABLED') throw new AppError(409,'OPENLIST_DISABLED',e.message);
+    throw new AppError(502,'OPENLIST_SYNC_FAILED',`OpenList 同步失败：${e.message}`);
+  }
 }));
 
 r.get('/statistics',asyncHandler(async(_req,res)=>ok(res,await admin.statistics())));

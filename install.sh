@@ -74,7 +74,7 @@ prepare_env(){
   local jwt="${JWT_SECRET:-}"; [[ ${#jwt} -ge 32&&"$jwt" != CHANGE_ME* ]]||jwt="$(random_hex 32)"
   local salt="${IP_HASH_SALT:-}"; [[ ${#salt} -ge 8&&"$salt" != CHANGE_ME* ]]||salt="$(random_hex 24)"
   local source_key="${SOURCE_CONFIG_KEY:-}"; [[ ${#source_key} -ge 16&&"$source_key" != CHANGE_ME* ]]||source_key="$(random_hex 32)"
-  local admin_password="${ADMIN_PASSWORD:-}"; if [[ ! -f "$ROOT/data/control/admin.json" ]]; then [[ -n "$admin_password"&&"$admin_password" != CHANGE_ME* ]]||admin_password="Zonoe-$(random_hex 8)"; fi
+  local admin_password="${ADMIN_PASSWORD:-}"; if [[ ! -f "$ROOT/data/control/admin.json" ]]; then admin_password="123456"; fi
 
   touch "$ROOT/.env"
   set_env NODE_ENV production; set_env HOST 127.0.0.1; set_env PORT 3000
@@ -96,7 +96,7 @@ Username: ${ADMIN_USERNAME:-admin}
 Bootstrap Password: ${admin_password:-已存在，请使用后台当前密码}
 Generated: $(date -Iseconds)
 
-提示：后台修改密码后，以后台新密码为准；.env 中 ADMIN_PASSWORD 仅用于首次初始化。
+提示：新安装初始密码固定为 123456，请首次登录后立即在后台修改；升级不会覆盖已修改密码。
 INFO
     chmod 600 "$ROOT/data/install-info.txt"
   fi

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { metadataChanged, publicUrlToApiPath } from '../src/services/openListMetadataService.js';
+import { metadataChanged, publicUrlToApiPath, RECOMMENDED_OPENLIST_SCHEDULE } from '../src/services/openListMetadataService.js';
+import { normalizeSchedule } from '../src/storage/controlStore.js';
 
 describe('OpenList IPA metadata sync contract',()=>{
   const cfg={url:'https://yun.zonoeios.xyz',publicPathPrefix:'/d/a/app/',apiBasePath:'/'};
@@ -19,5 +20,12 @@ describe('OpenList IPA metadata sync contract',()=>{
     expect(metadataChanged({md5:'',size:100,modified:'x'},{md5:'',size:100,modified:'x'})).toBe(false);
     expect(metadataChanged({md5:'',size:100,modified:'x'},{md5:'',size:101,modified:'x'})).toBe(true);
     expect(metadataChanged({md5:'',size:100,modified:'x'},{md5:'',size:100,modified:'y'})).toBe(true);
+  });
+
+  test('scheduler has conservative Tianyi defaults and safe bounds',()=>{
+    expect(RECOMMENDED_OPENLIST_SCHEDULE.intervalMinutes).toBe(10);
+    expect(RECOMMENDED_OPENLIST_SCHEDULE.parseLimit).toBe(3);
+    expect(normalizeSchedule({enabled:true,intervalMinutes:1,parseLimit:99})).toEqual({enabled:true,intervalMinutes:5,parseLimit:20});
+    expect(normalizeSchedule({})).toEqual({enabled:false,intervalMinutes:10,parseLimit:3});
   });
 });

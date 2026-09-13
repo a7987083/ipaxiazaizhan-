@@ -10,6 +10,8 @@ const SETTINGS_FILE = path.join(CONTROL_DIR, 'settings.json');
 const SOURCES_FILE = path.join(CONTROL_DIR, 'mysql-sources.json');
 const OPENLIST_FILE = path.join(CONTROL_DIR, 'openlist.json');
 const IPA_CACHE_FILE = path.join(CONTROL_DIR, 'openlist-ipa-cache.json');
+const OPENLIST_DIR_CACHE_FILE = path.join(CONTROL_DIR, 'openlist-directory-cache.json');
+const OPENLIST_TASK_FILE = path.join(CONTROL_DIR, 'openlist-task.json');
 const DOWNLOAD_DIR = path.join(CONTROL_DIR, 'downloads');
 
 let writeQueue = Promise.resolve();
@@ -34,6 +36,14 @@ async function writeJson(file, value) {
 function cleanSlug(v='') {
   const s=String(v).trim().toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'');
   return s || `source-${Date.now()}`;
+}
+
+function normalizeSchedule(input={}) {
+  return {
+    enabled: input?.enabled === true,
+    intervalMinutes: Math.min(1440,Math.max(5,Number(input?.intervalMinutes)||10)),
+    parseLimit: Math.min(20,Math.max(1,Number(input?.parseLimit)||3))
+  };
 }
 
 function publicSource(row) {
@@ -67,6 +77,8 @@ function publicOpenList(row) {
     publicPathPrefix: cfg.publicPathPrefix || '/d/a/app/',
     apiBasePath: cfg.apiBasePath || '/',
     tokenConfigured: Boolean(cfg.token),
+    schedule: normalizeSchedule(row?.schedule),
+    directoryCacheMinutes: 30,
     createdAt: row?.createdAt || null,
     updatedAt: row?.updatedAt || null
   };
@@ -77,15 +89,14 @@ export async function ensureControlInitialized() {
   await fs.mkdir(DOWNLOAD_DIR, {recursive:true, mode:0o750});
   const admin=await readJson(ADMIN_FILE, null);
   if (!admin) {
-    if (!env.ADMIN_PASSWORD || env.ADMIN_PASSWORD.length < 10) {
-      throw new Error('ADMIN_PASSWORD must be at least 10 chars for first bootstrap');
-    }
+    const bootstrapPassword=String(env.ADMIN_PASSWORD||'123456');
+    if (bootstrapPassword.length < 6) throw new Error('ADMIN_PASSWORD must be at least 6 chars for first bootstrap');
     const now=new Date().toISOString();
     await writeJson(ADMIN_FILE, {
       id:1,
       username:env.ADMIN_USERNAME || 'admin',
       email:env.ADMIN_EMAIL || null,
-      passwordHash:await bcrypt.hash(env.ADMIN_PASSWORD, 12),
+      passwordHash:await bcrypt.hash(bootstrapPassword, 12),
       role:'superadmin',
       status:'active',
       sessionVersion:1,
@@ -206,7 +217,7 @@ export async function getOpenListConfig({withSecret=false}={}) {
   if(!withSecret) return publicOpenList(row);
   let config={};
   try { config=decryptJson(row.configEncrypted); } catch {}
-  return {...row,config};
+  return {...row,config,schedule:normalizeSchedule(row.schedule)};
 }
 
 export async function saveOpenListConfig(data) {
@@ -225,6 +236,7 @@ export async function saveOpenListConfig(data) {
   };
   const row={
     enabled:data.enabled!==undefined?!!data.enabled:(old?.enabled!==false),
+    schedule:normalizeSchedule(old?.schedule),
     configEncrypted:encryptJson(cfg),
     createdAt:old?.createdAt||now,
     updatedAt:now
@@ -233,14 +245,46 @@ export async function saveOpenListConfig(data) {
   return publicOpenList(row);
 }
 
+export async function saveOpenListSchedule(data) {
+  await ensureControlInitialized();
+  const row=await readJson(OPENLIST_FILE, null);
+  if(!row) throw Object.assign(new Error('请先保存 OpenList 配置'),{code:'OPENLIST_CONFIG_REQUIRED'});
+  row.schedule=normalizeSchedule(data);
+  row.updatedAt=new Date().toISOString();
+  await writeJson(OPENLIST_FILE,row);
+  return publicOpenList(row);
+}
+
 export async function readOpenListIpaCache() {
   await ensureControlInitialized();
-  return readJson(IPA_CACHE_FILE,{version:1,files:{},apps:{},lastSync:null});
+  return readJson(IPA_CACHE_FILE,{version:2,files:{},apps:{},missingEntries:[],lastSync:null});
 }
 
 export async function writeOpenListIpaCache(value) {
-  const normalized={version:1,files:value?.files||{},apps:value?.apps||{},lastSync:value?.lastSync||null};
+  const normalized={version:2,files:value?.files||{},apps:value?.apps||{},missingEntries:Array.isArray(value?.missingEntries)?value.missingEntries:[],lastSync:value?.lastSync||null};
   await writeJson(IPA_CACHE_FILE,normalized);
+  return normalized;
+}
+
+export async function readOpenListDirectoryCache() {
+  await ensureControlInitialized();
+  return readJson(OPENLIST_DIR_CACHE_FILE,{version:1,scopeKey:'',directories:{}});
+}
+
+export async function writeOpenListDirectoryCache(value) {
+  const normalized={version:1,scopeKey:String(value?.scopeKey||''),directories:value?.directories||{}};
+  await writeJson(OPENLIST_DIR_CACHE_FILE,normalized);
+  return normalized;
+}
+
+export async function readOpenListTask() {
+  await ensureControlInitialized();
+  return readJson(OPENLIST_TASK_FILE,{state:'idle',stage:'idle',message:'',progress:{},updatedAt:null});
+}
+
+export async function writeOpenListTask(value) {
+  const normalized={state:'idle',stage:'idle',message:'',progress:{},...value,updatedAt:new Date().toISOString()};
+  await writeJson(OPENLIST_TASK_FILE,normalized);
   return normalized;
 }
 
@@ -257,4 +301,4 @@ export async function countTodayDownloads() {
   catch(e){ if(e?.code==='ENOENT') return 0; throw e; }
 }
 
-export { CONTROL_DIR, DOWNLOAD_DIR, IPA_CACHE_FILE };
+export { CONTROL_DIR, DOWNLOAD_DIR, IPA_CACHE_FILE, OPENLIST_DIR_CACHE_FILE, OPENLIST_TASK_FILE, normalizeSchedule };
