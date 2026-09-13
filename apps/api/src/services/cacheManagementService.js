@@ -5,25 +5,30 @@ import {
   readOpenListDirectoryCache, writeOpenListDirectoryCache,
   readOpenListTask
 } from '../storage/controlStore.js';
+import {
+  IPA_METADATA_LIBRARY_FILE,
+  clearIpaMetadataLibrary,
+  readIpaMetadataLibrary
+} from './ipaMetadataLibrary.js';
 
 async function fileStat(file){
   try{const s=await fs.stat(file);return {bytes:Number(s.size||0),updatedAt:s.mtime?.toISOString?.()||null}}
   catch(e){if(e?.code==='ENOENT')return {bytes:0,updatedAt:null};throw e}
 }
 export async function getLocalCacheStatus(){
-  const [ipa,dirs,task,ipaStat,dirStat,taskStat]=await Promise.all([
-    readOpenListIpaCache(),readOpenListDirectoryCache(),readOpenListTask(),
-    fileStat(IPA_CACHE_FILE),fileStat(OPENLIST_DIR_CACHE_FILE),fileStat(OPENLIST_TASK_FILE)
+  const [ipa,dirs,task,library,ipaStat,dirStat,taskStat,libraryStat]=await Promise.all([
+    readOpenListIpaCache(),readOpenListDirectoryCache(),readOpenListTask(),readIpaMetadataLibrary(),
+    fileStat(IPA_CACHE_FILE),fileStat(OPENLIST_DIR_CACHE_FILE),fileStat(OPENLIST_TASK_FILE),fileStat(IPA_METADATA_LIBRARY_FILE)
   ]);
   const files=Object.values(ipa.files||{});
   const parsed=files.filter(x=>x?.parsed&&(!x?.md5||!x?.parsedMd5||x.parsedMd5===x.md5)&&!x?.parseError).length;
   const failed=files.filter(x=>x?.parseError).length;
   const pending=files.filter(x=>!x?.missing&&(!x?.parsed||(x?.md5&&x?.parsedMd5!==x?.md5))).length;
   return {
-    ipa:{...ipaStat,files:files.length,parsed,pending,failed,apps:Object.keys(ipa.appRefs||ipa.apps||{}).length,lastSync:ipa.lastSync||null},
+    ipa:{...ipaStat,files:files.length,parsed,pending,failed,apps:Object.keys(ipa.appRefs||ipa.apps||{}).length,lastSync:ipa.lastSync||null,metadataLibraryEntries:Object.keys(library.entries||{}).length,metadataLibraryBytes:Number(libraryStat.bytes||0)},
     directory:{...dirStat,directories:Object.keys(dirs.directories||{}).length,scopeKey:dirs.scopeKey||''},
     task:{...taskStat,state:task?.state||'idle',stage:task?.stage||'idle',updatedAt:task?.updatedAt||taskStat.updatedAt},
-    totalBytes:Number(ipaStat.bytes||0)+Number(dirStat.bytes||0)+Number(taskStat.bytes||0)
+    totalBytes:Number(ipaStat.bytes||0)+Number(dirStat.bytes||0)+Number(taskStat.bytes||0)+Number(libraryStat.bytes||0)
   };
 }
 function assertIdle(task){
@@ -39,6 +44,7 @@ export async function clearLocalCache(target){
   }
   if(target==='ipa'||target==='all'){
     await writeOpenListIpaCache({version:3,files:{},apps:{},appRefs:{},missingEntries:[],lastSync:null});
+    await clearIpaMetadataLibrary();
   }else if(target==='failed'){
     const cache=await readOpenListIpaCache();
     let reset=0;
