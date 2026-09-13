@@ -155,6 +155,7 @@ export async function saveReplicaManagerConfig(input){
   const {config}=await context();const storages=await listOpenListStorages(config);const byId=new Map(storages.map(x=>[x.id,x]));
   const mounts=(Array.isArray(input?.mounts)?input.mounts:[]).map(x=>{
     const storage=byId.get(Number(x.storageId));if(!storage)throw err('REPLICA_CONFIG_INVALID',`OpenList 存储 ${x.storageId} 不存在`);
+    if(String(storage.driver).toLowerCase()==='alias')throw err('REPLICA_CONFIG_INVALID',`Alias ${storage.mountPath} 只能用于分流检查，不能作为实体副本盘`);
     const rootPath=cleanPath(x.rootPath||storage.mountPath);if(!validateRoot(storage.mountPath,rootPath))throw err('REPLICA_CONFIG_INVALID',`副本目录 ${rootPath} 必须位于挂载 ${storage.mountPath} 内`);
     return {storageId:storage.id,mountPath:storage.mountPath,rootPath,enabled:x.enabled!==false,writable:x.writable===true,label:String(x.label||storage.remark||storage.mountPath)};
   });
@@ -168,6 +169,7 @@ export async function previewReplicas(){
   const expected=await readExpected(config);const snapshots=[];
   for(const mount of replica.mounts.filter(x=>x.enabled!==false)){
     const storage=byId.get(mount.storageId);if(!storage){snapshots.push({...mount,files:{},error:'OpenList 中已找不到此存储'});continue}
+    if(storage.disabled){snapshots.push({...mount,label:mount.label||storage.remark||storage.mountPath,files:{},error:'此 OpenList 存储当前已禁用'});continue}
     try{snapshots.push({...mount,label:mount.label||storage.remark||storage.mountPath,files:await listIpaTree(config,mount.rootPath)})}
     catch(e){snapshots.push({...mount,label:mount.label||storage.remark||storage.mountPath,files:{},error:e?.message||'扫描失败'})}
   }
@@ -184,15 +186,16 @@ function fullFromRelative(root,relative){return joinPath(root,String(relative||'
 
 export async function syncMissingReplicas({limit=20,targetStorageIds=[]}={}){
   const {config,replica}=await context();if(!replica.enabled)throw err('REPLICA_DISABLED','云盘副本管理尚未启用');if(!replica.allowCopy)throw err('REPLICA_COPY_DISABLED','请先开启“允许副本复制”');
-  const preview=await previewReplicas();const targetSet=new Set((targetStorageIds||[]).map(Number));const mountCfg=new Map(replica.mounts.map(x=>[x.storageId,x]));const actions=[];
+  const preview=await previewReplicas();const targetSet=new Set((targetStorageIds||[]).map(Number));const mountCfg=new Map(replica.mounts.map(x=>[x.storageId,x]));const mountState=new Map((preview.mounts||[]).map(x=>[Number(x.storageId),x]));const actions=[];const cap=Math.min(50,Math.max(1,Number(limit)||20));
   for(const row of preview.rows){
-    const sourceId=Object.entries(row.copies).find(([,present])=>present)?.[0];if(!sourceId)continue;
+    const sourceId=Object.entries(row.copies).find(([id,present])=>present&&!mountState.get(Number(id))?.error)?.[0];if(!sourceId)continue;
     const source=mountCfg.get(Number(sourceId));if(!source)continue;
     for(const [id,present] of Object.entries(row.copies)){
-      if(present)continue;const target=mountCfg.get(Number(id));if(!target||!target.writable)continue;if(targetSet.size&&!targetSet.has(Number(id)))continue;
-      actions.push({relativePath:row.relativePath,source,target});if(actions.length>=Math.min(50,Math.max(1,Number(limit)||20)))break;
+      if(present)continue;const target=mountCfg.get(Number(id)),state=mountState.get(Number(id));if(!target||!target.writable||state?.error)continue;if(targetSet.size&&!targetSet.has(Number(id)))continue;
+      if(state?.renameSuggestions?.some(x=>x.toRelative===row.relativePath))continue;
+      actions.push({relativePath:row.relativePath,source,target});if(actions.length>=cap)break;
     }
-    if(actions.length>=Math.min(50,Math.max(1,Number(limit)||20)))break;
+    if(actions.length>=cap)break;
   }
   const queued=[],failed=[];
   for(const a of actions){
@@ -202,7 +205,7 @@ export async function syncMissingReplicas({limit=20,targetStorageIds=[]}={}){
       queued.push({relativePath:a.relativePath,sourceStorageId:a.source.storageId,targetStorageId:a.target.storageId});
     }catch(e){failed.push({relativePath:a.relativePath,targetStorageId:a.target.storageId,message:e?.message||'复制失败'})}
   }
-  return {queued,failed,remainingCandidates:Math.max(0,actions.length-queued.length-failed.length),note:'OpenList 跨存储复制可能进入后台任务队列；完成后重新对账即可确认副本。'};
+  return {queued,failed,submitted:actions.length,note:'OpenList 跨存储复制可能进入后台任务队列；完成后重新对账即可确认副本。'};
 }
 
 export async function renameReplicaSuggestion({storageId,fromRelative,toRelative}){
@@ -219,7 +222,7 @@ export async function quarantineReplicaExtras({items=[]}={}){
   const preview=await previewReplicas();const selected=(items||[]).slice(0,50),moved=[],failed=[];const today=new Date().toISOString().slice(0,10);
   for(const item of selected){
     const mount=preview.mounts.find(x=>Number(x.storageId)===Number(item.storageId));const cfg=replica.mounts.find(x=>Number(x.storageId)===Number(item.storageId));
-    if(!mount||!cfg?.writable||!mount.extra.some(x=>x.relativePath===item.relativePath)){failed.push({...item,message:'不是当前可隔离的多余 IPA，或目标网盘不可写'});continue}
+    if(!mount||mount.error||!cfg?.writable||!mount.extra.some(x=>x.relativePath===item.relativePath)){failed.push({...item,message:'不是当前可隔离的多余 IPA，或目标网盘不可写'});continue}
     try{
       const src=fullFromRelative(cfg.rootPath,item.relativePath),srcDir=path.posix.dirname(src),name=path.posix.basename(src);const relativeDir=path.posix.dirname(item.relativePath)==='.'?'':path.posix.dirname(item.relativePath);
       const dstDir=joinPath(cfg.rootPath,replica.quarantineFolder,today,relativeDir);await ensureDir(config,dstDir);await openListRequest(config,'/api/fs/move',{body:{src_dir:srcDir,dst_dir:dstDir,names:[name]}});moved.push(item);
