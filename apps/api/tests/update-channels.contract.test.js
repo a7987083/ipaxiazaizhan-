@@ -47,7 +47,6 @@ describe('dual-channel online updater contract',()=>{
     expect(s).toContain('新版本启动后持久配置恢复/健康检查失败');
   });
 
-
   test('native update keeps rollback dependencies independent and validates runtime imports',()=>{
     const updater=read('update.sh');
     const installer=read('install.sh');
@@ -55,6 +54,10 @@ describe('dual-channel online updater contract',()=>{
     expect(updater).toContain('cp -a --reflink=auto');
     expect(updater).not.toContain('cp -al "$src" "$dst"');
     expect(installer).toContain('api_runtime_import_smoke');
+    expect(installer).toContain('api_runtime_dependency_access_smoke');
+    expect(installer).toContain('runuser -u "$RUNTIME_USER"');
+    expect(installer).toContain('umask 0022');
+    expect(installer).toContain('chmod -R a+rX');
     expect(installer).toContain('清理 node_modules 后重新安装一次');
     expect(worker).toContain('ERR_MODULE_NOT_FOUND');
     expect(worker).toContain('更新失败，恢复更新前 Node 依赖');
