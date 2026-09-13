@@ -66,9 +66,16 @@ r.put('/settings/:key',asyncHandler(async(req,res)=>{ const p=z.object({value:z.
 
 r.get('/system/update',asyncHandler(async(_req,res)=>ok(res,await getOnlineUpdateStatus())));
 r.post('/system/update',asyncHandler(async(req,res)=>{
-  try { const requestedBy=String(req.admin?.username||'admin'); ok(res,await queueOnlineUpdate({requestedBy})); }
-  catch(e) { if(e?.code==='UPDATE_BUSY') throw new AppError(409,'UPDATE_BUSY',e.message); throw e; }
+  const p=z.object({channel:z.enum(['stable','preview']).default('stable')}).parse(req.body||{});
+  try { const requestedBy=String(req.admin?.username||'admin'); ok(res,await queueOnlineUpdate({requestedBy,channel:p.channel})); }
+  catch(e) {
+    if(e?.code==='UPDATE_BUSY') throw new AppError(409,'UPDATE_BUSY',e.message);
+    if(e?.code==='UPDATE_NOT_AVAILABLE') throw new AppError(409,'UPDATE_NOT_AVAILABLE',e.message);
+    if(e?.code==='UPDATE_CHECK_FAILED') throw new AppError(502,'UPDATE_CHECK_FAILED',e.message);
+    if(e?.code==='UPDATE_CHANNEL_INVALID') throw new AppError(400,'UPDATE_CHANNEL_INVALID',e.message);
+    throw e;
+  }
 }));
 
-r.post('/upload',(_req,_res,next)=>next(new AppError(405,'UPLOAD_DISABLED','此站点直接使用现有 MySQL 软件源和原 IPA 地址，不再重复上传 IPA')));
+r.post('/upload',(_req,_res,next)=>next(new AppError(405,'UPLOAD_DISABLED','此站点直接使用现有 MySQL 软件源，仅供查看，不再重复上传 IPA')));
 export default r;
