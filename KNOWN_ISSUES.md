@@ -1,12 +1,13 @@
 # Known Issues
 
-## 2026091222 candidate
+## 2026091224 candidate
 
-- GitHub Actions #60 passed, but real BaoTa deployment and real MySQL write-back are not yet verified.
-- Auto-writeback is intentionally limited to existing App rows; new IPA files without an existing `source_slug:legacy_id` mapping are not inserted automatically.
-- Field semantics depend on each software source schema. ZONOE validates that a target column exists, but cannot know whether a custom column has the business meaning the operator intends.
-- For safety, write-back requires exact current `md5 === parsedMd5`. Old caches may need a fresh MD5 scan / parse before they become write-back eligible.
-- `always` still skips an UPDATE when the database already contains the same value, avoiding pointless writes.
-- Cache clearing is blocked while an OpenList scan/parse task is running.
-- Write-back configuration is stored in ZONOE control data and should be included by the existing control-directory backup/update flow; real updater preservation still needs 1222 deployment verification.
-- Automatic creation of brand-new App rows is deferred until existing-row write-back is verified against the real software-source schema and operational workflow.
+- GitHub Actions #79 passed, but real BaoTa 2026091224 deployment and real MySQL write-back are not yet verified.
+- Admin parse-result download URLs are read from the current source MySQL `bt1a` at request time. If a source DB is unreachable, that source's admin download URL may be blank even though cached IPA metadata remains visible.
+- “IPA 下载链接”作为写入来源会优先根据当前 OpenList 配置 + 已解析 `apiPath` 生成规范下载 URL；必要时回退现有数据库 `bt1a`。上线后应先用真实目录映射验证该 URL 与实际公开下载路径一致，再允许自动写入 `bt1a`。
+- Auto-writeback remains intentionally limited to existing App rows; brand-new IPA files without an existing `source_slug:legacy_id` mapping are not inserted automatically.
+- Dynamic rules validate that a target column exists and block duplicate enabled target columns, but ZONOE cannot infer the business semantics of arbitrary custom source-schema columns. Preview remains required before enabling writes.
+- For safety, write-back requires exact current `md5 === parsedMd5`, successful parse and no parseError. Stale/failed metadata cannot write the database.
+- Old 2026091222/1223 fixed `mappings` are migrated to dynamic rules at read/save time; real control-data migration should still be checked once on the deployed BaoTa instance.
+- Cache clearing remains blocked while an OpenList scan/parse task is running.
+- Automatic creation of brand-new App rows remains deferred until existing-row dynamic write-back is verified against the real software-source schema and workflow.
