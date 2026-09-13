@@ -1,5 +1,20 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091220 IPA parse results explorer
+
+- 以 2026091219 实机验证通过的宝塔 Native/在线更新链路作为可靠基线；本版不改 updater 核心机制。
+- OpenList IPA 缓存升级为 v3，增加安全 `appRefs` 索引，仅保存软件源/原 ID/App 名称与版本/DB 大小/API 内部路径，不保存 `bt1a`、Token 或 `raw_url`。
+- 后台新增完整解析结果分页、搜索和状态筛选：全部、已解析、待解析、失败、版本/大小异常。
+- 解析结果同时展示软件源版本/大小与 IPA 包内版本/Build/Bundle ID/最低 iOS/实际大小。
+- 版本不一致采用非空精确比较；大小差异超过 max(1 MiB, IPA 实际大小 1%) 才提示异常，降低格式/舍入造成的误报。
+- 旧 v2 缓存兼容读取；首次 1220 MD5 扫描后自动补齐安全 App 引用索引。
+- 新增 contract tests 覆盖 appRefs 不泄漏下载地址、缓存 schema 持久化及版本/大小异常判断。
+
+### 验证状态
+
+- 本地 Node 语法检查通过（API service/routes/tests）。
+- GitHub Actions、部署包和 1219 → 1220 在线更新仍需以本提交后的 CI/真实服务器结果为准。
+
 ## 2026-09-13 — 2026091217 Online update canary
 
 - 仅用于验证 2026091216 → 2026091217 的真实在线更新链路。

@@ -257,11 +257,11 @@ export async function saveOpenListSchedule(data) {
 
 export async function readOpenListIpaCache() {
   await ensureControlInitialized();
-  return readJson(IPA_CACHE_FILE,{version:2,files:{},apps:{},missingEntries:[],lastSync:null});
+  return readJson(IPA_CACHE_FILE,{version:3,files:{},apps:{},appRefs:{},missingEntries:[],lastSync:null});
 }
 
 export async function writeOpenListIpaCache(value) {
-  const normalized={version:2,files:value?.files||{},apps:value?.apps||{},missingEntries:Array.isArray(value?.missingEntries)?value.missingEntries:[],lastSync:value?.lastSync||null};
+  const normalized={version:3,files:value?.files||{},apps:value?.apps||{},appRefs:value?.appRefs||{},missingEntries:Array.isArray(value?.missingEntries)?value.missingEntries:[],lastSync:value?.lastSync||null};
   await writeJson(IPA_CACHE_FILE,normalized);
   return normalized;
 }

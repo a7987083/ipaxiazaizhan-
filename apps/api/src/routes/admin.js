@@ -5,7 +5,7 @@ import { asyncHandler,ok,AppError } from '../utils/http.js';
 import { csrfToken } from '../utils/crypto.js';
 import { login,changePassword } from '../services/authService.js';
 import { getOnlineUpdateStatus,queueOnlineUpdate } from '../services/updateService.js';
-import { getOpenListIpaStatus,queueOpenListIpaMetadata,testOpenListConnection,listMissingOpenListEntries,resetOpenListScheduler } from '../services/openListMetadataService.js';
+import { getOpenListIpaStatus,queueOpenListIpaMetadata,testOpenListConnection,listMissingOpenListEntries,listOpenListParseResults,resetOpenListScheduler } from '../services/openListMetadataService.js';
 import { testMysqlSource } from '../services/mysqlCli.js';
 import { getMysqlSource,saveOpenListConfig,saveOpenListSchedule } from '../storage/controlStore.js';
 import { loginLimiter } from '../middleware/rateLimit.js';
@@ -78,6 +78,16 @@ r.put('/openlist/schedule',asyncHandler(async(req,res)=>{
 r.get('/openlist/missing',asyncHandler(async(req,res)=>{
   const p=z.object({page:z.coerce.number().int().min(1).default(1),pageSize:z.coerce.number().int().min(1).max(200).default(100),q:z.string().optional().default('')}).parse(req.query||{});
   const x=await listMissingOpenListEntries(p); ok(res,x.items,{total:x.total,page:x.page,pageSize:x.pageSize,uniqueMissingFiles:x.uniqueMissingFiles});
+}));
+r.get('/openlist/results',asyncHandler(async(req,res)=>{
+  const p=z.object({
+    page:z.coerce.number().int().min(1).default(1),
+    pageSize:z.coerce.number().int().min(1).max(100).default(50),
+    q:z.string().optional().default(''),
+    status:z.enum(['all','parsed','pending','failed','mismatch']).default('all')
+  }).parse(req.query||{});
+  const x=await listOpenListParseResults(p);
+  ok(res,x.items,{total:x.total,page:x.page,pageSize:x.pageSize,counts:x.counts,requiresRescan:x.requiresRescan});
 }));
 r.post('/openlist/test',asyncHandler(async(_req,res)=>{
   try { ok(res,await testOpenListConnection()); }

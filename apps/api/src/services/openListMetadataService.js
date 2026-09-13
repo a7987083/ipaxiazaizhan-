@@ -40,6 +40,24 @@ function joinApiPath(base,relative) {
   return out.startsWith('/')?out:`/${out}`;
 }
 function numericSize(v){ const n=Number(String(v??'').trim()); return Number.isFinite(n)&&n>=0?Math.round(n):null; }
+export function safeAppRef(ref={}) {
+  return {
+    appKey:String(ref.appKey||''),sourceSlug:String(ref.sourceSlug||''),sourceName:String(ref.sourceName||''),
+    legacyId:Number(ref.legacyId||0),name:String(ref.name||''),version:String(ref.version||''),
+    dbSize:numericSize(ref.dbSize),apiPath:String(ref.apiPath||'')
+  };
+}
+export function auditIpaResult(ref={},file={}) {
+  const meta=file?.parsed||{};
+  const sourceVersion=String(ref.version||'').trim();
+  const packageVersion=String(meta.version||'').trim();
+  const versionMismatch=Boolean(sourceVersion&&packageVersion&&sourceVersion!==packageVersion);
+  const dbSize=Number(ref.dbSize||0),actualSize=Number(file?.size||0);
+  const sizeDelta=dbSize>0&&actualSize>0?Math.abs(dbSize-actualSize):0;
+  const sizeTolerance=actualSize>0?Math.max(1024*1024,Math.round(actualSize*0.01)):0;
+  const sizeMismatch=Boolean(dbSize>0&&actualSize>0&&sizeDelta>sizeTolerance);
+  return {versionMismatch,sizeMismatch,mismatch:versionMismatch||sizeMismatch,sizeDelta,sizeTolerance};
+}
 function nowIso(){ return new Date().toISOString(); }
 function taskId(){ return `${Date.now()}-${Math.random().toString(36).slice(2,8)}`; }
 function cacheScopeKey(config){ return `${String(config.url||'').replace(/\/+$/,'')}|${cleanBasePath(config.apiBasePath||'/')}|${cleanPrefix(config.publicPathPrefix||'/d/a/app/')}`; }
@@ -222,9 +240,12 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
   await updateTask(taskIdValue,{stage:'listing',message:'正在读取 OpenList 文件清单',progress:{databaseRefs:refs.length,ignoredRefs:ignored,directoriesTotal:dirs.length,directoriesDone:0}});
   const {remote,cacheHits,cacheRefreshes}=await buildRemoteIndex(config,dirs,{forceListRefresh,taskIdValue});
 
-  const apps={}; const files={}; const expected=[...new Set(refs.map(x=>x.apiPath))];
+  const apps={}; const appRefs={}; const files={}; const expected=[...new Set(refs.map(x=>x.apiPath))];
   let newFiles=0,changedFiles=0,unchangedFiles=0,missingFiles=0;
-  for(const ref of refs) apps[ref.appKey]=ref.apiPath;
+  for(const ref of refs) {
+    apps[ref.appKey]=ref.apiPath;
+    appRefs[ref.appKey]=safeAppRef(ref);
+  }
   for(const apiPath of expected) {
     const next=remote.get(apiPath);
     const prev=old.files?.[apiPath];
@@ -265,7 +286,7 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
   const eligiblePending=pending.filter(p=>!files[p].nextParseAfter || Date.parse(files[p].nextParseAfter)<=Date.now());
   const lastSync={finishedAt:nowIso(),databaseRefs:refs.length,ignoredRefs:ignored,uniqueFiles:expected.length,foundFiles:expected.length-missingFiles,missingFiles,missingRefs:missingEntries.length,newFiles,changedFiles,unchangedFiles,parsedNow,parseFailedNow,pendingParse:pending.length,eligibleParse:eligiblePending.length,cacheHits,cacheRefreshes,directoryCacheMinutes:30,sourceErrors};
   await updateTask(taskIdValue,{stage:'saving',message:'正在保存 IPA 元数据缓存',progress:{pendingParse:pending.length,eligibleParse:eligiblePending.length}});
-  await writeOpenListIpaCache({version:2,files,apps,missingEntries,lastSync});
+  await writeOpenListIpaCache({version:3,files,apps,appRefs,missingEntries,lastSync});
   return lastSync;
 }
 
@@ -298,6 +319,61 @@ export async function listMissingOpenListEntries({page=1,pageSize=100,q=''}={}) 
   if(needle) items=items.filter(x=>[x.name,x.version,x.downloadUrl,x.sourceName,x.sourceSlug,x.legacyId,x.apiPath].some(v=>String(v??'').toLowerCase().includes(needle)));
   const total=items.length,offset=(page-1)*pageSize;
   return {items:items.slice(offset,offset+pageSize),total,page,pageSize,uniqueMissingFiles:new Set(items.map(x=>x.apiPath)).size};
+}
+
+
+function resultRefFallback(cache) {
+  const refs=Object.values(cache.appRefs||{}).filter(x=>x?.appKey&&x?.apiPath);
+  if(refs.length) return {refs,requiresRescan:false};
+  const fallback=Object.entries(cache.apps||{}).map(([appKey,apiPath])=>{
+    const m=/^([^:]+):(\d+)$/.exec(String(appKey||''));
+    return safeAppRef({appKey,apiPath,sourceSlug:m?.[1]||'',legacyId:m?.[2]||0});
+  });
+  return {refs:fallback,requiresRescan:fallback.length>0};
+}
+
+export async function listOpenListParseResults({page=1,pageSize=50,q='',status='all'}={}) {
+  page=Math.max(1,Number(page)||1); pageSize=Math.min(100,Math.max(1,Number(pageSize)||50));
+  const allowed=new Set(['all','parsed','pending','failed','mismatch']);
+  status=allowed.has(String(status||''))?String(status):'all';
+  const cache=await readOpenListIpaCache();
+  const {refs,requiresRescan}=resultRefFallback(cache);
+  let items=refs.map(ref=>{
+    const file=cache.files?.[ref.apiPath];
+    if(!file||file.missing) return null;
+    const meta=file.parsed||{};
+    const currentParsed=Boolean(file.parsed&&(!file.md5||!file.parsedMd5||file.parsedMd5===file.md5));
+    const parseStatus=file.parseError?'failed':currentParsed?'parsed':'pending';
+    const audit=auditIpaResult(ref,file);
+    return {
+      appKey:ref.appKey,sourceSlug:ref.sourceSlug,sourceName:ref.sourceName,legacyId:ref.legacyId,
+      appName:ref.name,sourceVersion:ref.version,dbSize:ref.dbSize,
+      fileName:file.name||path.posix.basename(ref.apiPath||''),apiPath:ref.apiPath,size:Number(file.size||0),
+      modified:file.modified||'',verified:Boolean(file.md5),parsedAt:file.parsedAt||null,
+      parseStatus,parseError:String(file.parseError||''),
+      packageName:String(meta.name||''),packageVersion:String(meta.version||''),packageBuild:String(meta.build||''),
+      bundleId:String(meta.bundle_id||''),minimumIos:String(meta.minimum_ios||''),executable:String(meta.executable||''),
+      versionMismatch:audit.versionMismatch,sizeMismatch:audit.sizeMismatch,mismatch:audit.mismatch,
+      sizeDelta:audit.sizeDelta,sizeTolerance:audit.sizeTolerance
+    };
+  }).filter(Boolean);
+  const counts={
+    all:items.length,
+    parsed:items.filter(x=>x.parseStatus==='parsed').length,
+    pending:items.filter(x=>x.parseStatus==='pending').length,
+    failed:items.filter(x=>x.parseStatus==='failed').length,
+    mismatch:items.filter(x=>x.mismatch).length
+  };
+  const needle=String(q||'').trim().toLowerCase();
+  if(needle) items=items.filter(x=>[
+    x.appKey,x.sourceSlug,x.sourceName,x.legacyId,x.appName,x.sourceVersion,x.fileName,x.apiPath,
+    x.packageName,x.packageVersion,x.packageBuild,x.bundleId,x.minimumIos,x.executable,x.parseError
+  ].some(v=>String(v??'').toLowerCase().includes(needle)));
+  if(status==='mismatch') items=items.filter(x=>x.mismatch);
+  else if(status!=='all') items=items.filter(x=>x.parseStatus===status);
+  items.sort((a,b)=>String(b.parsedAt||b.modified||'').localeCompare(String(a.parsedAt||a.modified||''))||String(a.appKey).localeCompare(String(b.appKey)));
+  const total=items.length,offset=(page-1)*pageSize;
+  return {items:items.slice(offset,offset+pageSize),total,page,pageSize,counts,requiresRescan};
 }
 
 export async function getOpenListIpaStatus() {
