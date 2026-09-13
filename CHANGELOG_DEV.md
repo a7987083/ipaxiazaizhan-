@@ -1,5 +1,22 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091221 Public IPA metadata discovery
+
+- 继续以 2026091220 / `7f48a23c50072fd8a15c50aef74631ca8007504f` 为功能基线，不修改已验证的 updater 和 IPA Range 解析机制。
+- 公共 App 搜索接入 OpenList v3 安全缓存，可按 IPA 包内名称、包内版本、Build、Bundle ID、最低 iOS、文件名和 Executable 命中；最终 App 行仍从原 MySQL `fa_category` 读取。
+- `/api/v1/apps` 新增 `ipa=parsed|pending|failed` 和 `ios=<target>`；`ios` 表示 `MinimumOSVersion <= target`，只对当前 MD5 已解析数据判定，未知/过期/待解析/失败不猜测兼容。
+- 公共响应新增安全 `ipa_status`；详情保留 `source_file_size`，同时显示实际 OpenList IPA 大小。
+- 前台 App 列表增加 IPA 状态与目标 iOS 筛选；卡片显示包内版本/Build/最低 iOS；详情页把“IPA 已解析”和“MD5 已校验”拆开。
+- 新增 contract test 覆盖版本号数值比较、stale MD5 -> pending、Bundle ID/包内字段搜索、目标 iOS 兼容筛选和解析状态筛选。
+- 同步更新 API 与长期项目状态文档。
+
+### 验证状态
+
+- `apps/api/src/repositories/appRepository.js` 本地 `node --check` 通过。
+- 新 contract test 本地 `node --check` 通过。
+- 完整 Vitest、前端 Production build、BaoTa contract、部署包与当前 HEAD CI：提交后由 GitHub Actions 验证。
+- 真实 BaoTa 2026091221 E2E 待 CI 通过后执行。
+
 ## 2026-09-14 — 2026091220 IPA parse results explorer
 
 - 以 2026091219 实机验证通过的宝塔 Native/在线更新链路作为可靠基线；本版不改 updater 核心机制。

@@ -1,9 +1,10 @@
 # Known Issues
 
-## 1208 candidate
+## 2026091221 candidate
 
-- **Real BaoTa multi-source E2E pending.** CI uses a deterministic fake MySQL CLI adapter; a real MySQL 5.7/BaoTa connection must still be verified.
-- **Admin updater E2E pending on real host.** UI/API/systemd worker are implemented, but do not mark stable until a real forward update succeeds.
-- **MySQL client required.** Runtime uses the existing `mysql` CLI client (BaoTa commonly provides `/www/server/mysql/bin/mysql`) to avoid installing a second database engine or adding another Node DB driver. Installer detects/installs only a client if needed.
-- **External source DB backups are not taken by ZONOE updates.** Updates do not mutate application rows or IPA files. `writeStats` is opt-in; when disabled, sources are read-only.
-- **Old PostgreSQL service is not auto-uninstalled/stopped.** 1208 no longer connects to it, but automatic removal could break unrelated sites on the same server.
+- **Real BaoTa E2E pending for this candidate.** 2026091220 CI is green and 2026091219 is the documented real updater baseline, but 2026091221 public metadata search/filter still needs a real deployment check.
+- **Old or incomplete OpenList cache limits metadata discovery.** Bundle ID/package-field search and IPA/iOS filters require the v3 cache populated by a 1220+ MD5 scan. Apps without a current cache record remain visible in normal lists/search but cannot be positively matched by parsed-only filters.
+- **iOS compatibility is intentionally conservative.** `ios=<target>` only compares parsed `MinimumOSVersion`; pending, failed, stale-MD5 or missing values are excluded rather than guessed compatible.
+- **No CPU architecture/device-family/signing-encryption diagnostics yet.** Current parser exposes Info.plist-level identity/version/minimum-iOS data and file metadata only. Do not infer decrypted/sideloadable state from the current fields.
+- **Large ID-filter SQL has not been real-load benchmarked.** The implementation reuses the v3 metadata index to constrain original MySQL rows. Current catalog scale must be observed on the BaoTa host before raising scan/filter scope further.
+- **External MySQL source data remains authoritative.** ZONOE does not edit App rows or duplicate IPA files; source version/size mismatches are informational and admin-audited.

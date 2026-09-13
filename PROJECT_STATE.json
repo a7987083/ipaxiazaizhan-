@@ -1,9 +1,14 @@
 {
   "repository": "a7987083/ipaxiazaizhan-",
   "branch": "feature/baota-native-deploy-v1",
-  "version": "2026091208",
-  "phase": "Phase 1.5 Multi-MySQL Source Aggregation",
-  "phase_status": "implementation_pending_ci_after_multi_mysql_cutover",
+  "version": "2026091221",
+  "baseline": {
+    "version": "2026091220",
+    "commit": "7f48a23c50072fd8a15c50aef74631ca8007504f",
+    "ci": "passed"
+  },
+  "phase": "Phase 1.7 Public IPA Metadata Discovery",
+  "phase_status": "implementation_complete_ci_pending",
   "production_verified": false,
   "runtime": {
     "web": "BaoTa Nginx serves public/",
@@ -11,29 +16,34 @@
     "application_data": "one or more existing MySQL software-source databases, read directly",
     "application_table": "fa_category compatible",
     "control_plane": "data/control JSON files; encrypted source credentials; no PostgreSQL runtime dependency",
-    "ipa_storage": "original URLs from fa_category.bt1a; no duplicate upload"
+    "ipa_storage": "original source URLs; OpenList metadata cache only; no duplicate IPA upload"
   },
   "features": {
     "multi_mysql_sources": true,
     "composite_app_identity": "source_slug:legacy_id",
     "github_admin_update": true,
-    "admin_password_change": true,
-    "json_login_rate_limit": true,
+    "openlist_ipa_metadata": true,
+    "openlist_cache_schema": 3,
+    "admin_parse_results_explorer": true,
+    "public_package_metadata": true,
+    "public_bundle_id_search": true,
+    "public_ipa_status_filter": true,
+    "public_target_ios_filter": true,
     "duplicate_ipa_upload_disabled": true,
     "postgres_runtime_required": false
   },
   "verification": {
-    "local_shell_syntax": "passed",
-    "local_node_syntax": "passed",
-    "workflow_yaml_parse": "passed",
+    "baseline_2026091220_ci": "passed",
+    "local_changed_api_node_syntax": "passed",
+    "local_new_contract_test_node_syntax": "passed",
     "ci_for_current_head": "pending",
-    "real_baota_multi_mysql_e2e": "pending",
-    "real_admin_update_button_e2e": "pending"
+    "real_baota_2026091221_e2e": "pending"
   },
+  "next_task": "Wait for current-head CI result, then deploy 2026091221 through the verified updater and validate Bundle ID search, IPA status filters and target-iOS compatibility against real parsed cache data.",
   "notes": [
-    "1207 production/runtime baseline remains the last real BaoTa verification.",
-    "Existing PostgreSQL settings may remain in .env only for rollback compatibility; 1208 runtime code does not connect to PostgreSQL.",
-    "Installer never auto-stops or uninstalls a system PostgreSQL service because other sites may depend on it.",
-    "External MySQL software-source databases are not modified by updates. Download counter write-back is opt-in per source."
+    "2026091219 remains the last explicitly documented real BaoTa Native/online-update baseline.",
+    "2026091221 does not change updater internals or IPA parsing transport; it consumes the existing v3 safe cache.",
+    "Target-iOS compatibility is conservative: unknown, stale, pending or failed parse results are excluded because compatibility cannot be proven.",
+    "Public APIs do not expose bt1a, OpenList tokens, raw_url, internal OpenList paths or parse-error text."
   ]
 }
