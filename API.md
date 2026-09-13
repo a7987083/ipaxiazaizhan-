@@ -1,4 +1,4 @@
-# REST API v1 — 2026091224
+# REST API v1 — 2026091225
 
 统一格式：成功 `{ "ok": true, "data": ..., "meta": ... }`；失败 `{ "ok": false, "error": { "code": "...", "message": "..." } }`。所有非 GET 后台请求必须携带 `X-CSRF-Token`。
 
@@ -13,7 +13,7 @@
 - `GET /api/v1/settings`
 - `GET /download/{source_slug:legacy_id}` -> 302 到原 `fa_category.bt1a`
 
-公开 API 不新增后台 MySQL `bt1a` 管理字段；1224 的下载地址增强只存在于受保护的管理员接口。
+公开 API 不暴露后台管理用下载地址、OpenList Token、网盘写权限或副本管理配置。
 
 ## Admin — common
 
@@ -24,23 +24,56 @@
 - `GET|POST|PUT|DELETE /api/v1/admin/sources...`
 - `GET|PUT /api/v1/admin/openlist...`
 - `GET /api/v1/admin/openlist/results`
+- `GET /api/v1/admin/openlist/results-rich`
 - `GET /api/v1/admin/openlist/missing`
 - `GET|POST /api/v1/admin/system/update`
 
-### 1224 管理员 IPA 解析结果 + 当前下载地址
+## OpenList 多云盘副本管理 — 2026091225
+
+- `GET /api/v1/admin/openlist/replicas`
+  - 读取 ZONOE 副本配置、OpenList 挂载存储摘要和 Alias 覆盖检查。
+  - OpenList `addition` 不直接返回前端，仅在服务端用于有限的 Alias 路径匹配/策略线索检查。
+- `PUT /api/v1/admin/openlist/replicas`
+  - 保存实体副本盘、每盘副本根目录、是否可写、写操作权限和 Alias 挂载路径。
+  - Alias 不能被配置成实体副本盘。
+- `POST /api/v1/admin/openlist/replicas/preview`
+  - 以启用的 MySQL 软件源当前 `bt1a` 为期望清单，递归扫描选中的 OpenList 实体网盘目录。
+  - 返回每盘 `present / missing / extra`、MD5 可确认的同目录改名建议，以及 App × 网盘副本矩阵。
+- `POST /api/v1/admin/openlist/replicas/sync`
+  - 请求体：`{ "limit": 20, "targetStorageIds": [] }`。
+  - 只向标记为“可写”的缺失目标盘提交 OpenList `/api/fs/copy` 跨存储复制；单次最多 50 条。
+  - 如果缺失条目已有可靠的 MD5 改名建议，不会先复制第二份，而是等待名称修复。
+- `POST /api/v1/admin/openlist/replicas/rename`
+  - 仅执行当前重新对账后仍然成立的 MD5 改名建议。
+  - 当前版本要求错误文件名与期望文件位于同一相对目录，避免跨目录误移动。
+- `POST /api/v1/admin/openlist/replicas/quarantine`
+  - 仅处理当前重新对账仍属于 `extra` 的 IPA。
+  - 通过 OpenList `/api/fs/move` 移入 `<副本根目录>/<隔离目录>/<YYYY-MM-DD>/...`。
+  - 2026091225 没有永久删除 API。
+
+### 权限与安全边界
+
+1. `enabled`、`allowCopy`、`allowRename`、`allowQuarantine` 默认均不会因为升级自动打开。
+2. 实体盘必须显式勾选；写操作还要求该盘单独标记 `writable=true`。
+3. 永久删除未实现；多余文件只能人工确认后移动到隔离区。
+4. 每次重命名和隔离前都会重新对账，防止使用过期页面结果直接修改云盘。
+5. ZONOE 不下载再上传 IPA；复制/移动/改名全部调用 OpenList 文件 API。
+6. OpenList 跨存储 copy 可能进入 OpenList 后台任务队列，提交成功不代表字节已完成复制；需稍后重新对账确认。
+7. OpenList Token 必须具备调用所需 API 的权限。仅元数据扫描可使用较低权限；副本管理还需要存储列表和相应文件写权限。
+8. Alias 在 1225 中只做发现/覆盖检查，不由 ZONOE 自动创建或改写驱动配置。最终读取冲突策略应在 OpenList 中配置为适合的原生负载均衡模式。
+
+## 管理员 IPA 解析结果 + 当前下载地址
 
 - `GET /api/v1/admin/openlist/results-rich?page=1&pageSize=50&status=all&q=`
 
-返回与 `openlist/results` 相同的解析结果，并为当前页每个 App 增加管理员专用 `downloadUrl`。该值按 `sourceSlug + legacyId` 实时从对应 MySQL 表的 `bt1a` 读取，不写入 OpenList `appRefs` 安全缓存，不暴露到 Public API。
-
-`GET /api/v1/admin/openlist/missing` 原本已经包含缺失条目的 `downloadUrl`；1224 管理界面开始实际显示该字段。
+为当前页解析结果增加管理员专用 `downloadUrl`；按 `sourceSlug + legacyId` 实时读取 MySQL `bt1a`，不写入安全 `appRefs` 缓存，不暴露到 Public API。
 
 ## 中文站点设置
 
 - `GET /api/v1/admin/settings`
 - `PUT /api/v1/admin/settings`
 
-批量保存 `site_name`、`site_notice`、`hero_title`。旧的 `PUT /settings/{key}` 保持兼容。
+批量保存 `site_name`、`site_notice`、`hero_title`。
 
 ## 本地缓存管理
 
@@ -57,49 +90,4 @@
 - `POST /api/v1/admin/sources/{id}/writeback/apply`
 - `GET /api/v1/admin/sources/{id}/writeback/history?limit=50`
 
-### 1224 配置模型
-
-写回配置从固定 `mappings` 升级为动态 `rules[]`。旧 `mappings` 会自动迁移。
-
-每条规则：
-
-```json
-{
-  "id": "custom-1",
-  "enabled": true,
-  "source": "download_url",
-  "column": "bt1a",
-  "strategy": "changed"
-}
-```
-
-可选 `source`：
-
-- `package_name`：IPA 包内名称
-- `package_version`：IPA 版本号
-- `package_build`：IPA Build
-- `bundle_id`：Bundle ID
-- `minimum_ios`：最低 iOS
-- `file_size`：IPA 实际大小
-- `download_url`：IPA 下载链接
-- `executable`：Executable
-- `md5`：IPA MD5
-
-策略：
-
-- `preview`：只预览，不写入
-- `changed`：值变化时更新
-- `empty`：仅数据库为空时填充
-- `always`：以当前来源值为准；如果值本来相同仍不会执行无意义 UPDATE
-
-保护规则：
-
-1. “允许手动写入数据库”默认关闭；关闭时只能预览。
-2. “IPA 解析成功后自动写入数据库”默认关闭，并依赖手动写入总开关。
-3. 动态规则可以新增、删除、修改来源/目标列/策略。
-4. 不允许两个已启用规则写入同一个 MySQL 列。
-5. 目标列必须真实存在于当前应用表。
-6. 只 UPDATE 已存在 App；2026091224 仍不自动 INSERT 新 App。
-7. 只有 `md5 === parsedMd5`、解析成功且无 parseError 的当前 IPA 元数据才有资格写入。
-8. `download_url` 可映射到 `bt1a`；自动模式启用前应先在真实环境预览并确认生成/回退后的地址正确。
-9. 写入历史保存在 ZONOE control 数据目录，不包含 MySQL 密码或 OpenList Token。
+写回配置使用动态 `rules[]`；可选来源包括 `package_name`、`package_version`、`package_build`、`bundle_id`、`minimum_ios`、`file_size`、`download_url`、`executable`、`md5`。策略为 `preview / changed / empty / always`。仍只 UPDATE 已有 App，不自动 INSERT 新 App；当前成功解析和 `md5 === parsedMd5` 保护继续生效。

@@ -1,5 +1,22 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091225 OpenList multi-drive replica management
+
+- 新增后台“云盘副本”模块，读取 OpenList 管理存储列表并区分实体网盘与 Alias 分流盘。
+- 每个实体网盘可独立配置副本根目录、是否参与管理、是否允许写操作；副本管理/复制/改名/隔离权限全部默认关闭，不因升级自动打开。
+- 以启用 MySQL 软件源当前 `bt1a` 为权威期望清单，对选中网盘递归扫描 IPA，并输出每盘已有、缺失、多余和 App × 网盘副本矩阵。
+- 新增 OpenList 原生跨存储补齐：调用 `/api/fs/copy`，ZONOE 不中转 IPA 数据；后台默认单次最多提交 20 条，API 上限 50 条。
+- 新增 MD5 名称修复：期望路径缺失且同目录恰有一个 MD5 相同的多余文件时才建议改名；执行前重新对账，再调用 `/api/fs/rename`。
+- 新增多余 IPA 隔离：执行前重新对账确认仍为 `extra`，再调用 `/api/fs/move` 移到 `.zonoe-quarantine/<YYYY-MM-DD>/...`；1225 不提供永久删除 API。
+- Alias 不能被选择为实体副本盘。后台可发现 Alias 并检查配置字符串是否覆盖已选副本根目录，但不自动创建/修改 Alias；最终下载分流由 OpenList 原生 Alias 读取冲突/负载均衡策略完成。
+- OpenList Token 文案从“只读 Token”改为通用 Token，并明确：元数据读取和副本写操作需要不同权限范围。
+- 新增 `openlist-replicas.json` 控制配置，并由现有持久化 control 目录保存，在线更新沿用原持久化目录机制。
+- 新增受保护管理员 API：`GET|PUT /openlist/replicas`、`POST /openlist/replicas/preview|sync|rename|quarantine`。
+- 新增 contract tests 覆盖 API 路径转相对副本路径、缺失/多余识别、同目录唯一 MD5 改名建议和跨目录拒绝建议。
+- Actions #89 首次失败不是业务逻辑失败：新 contract 误用了 Node `node:test`，三条算法子测试本身已通过，但 Vitest 报“no test suite”。改成 Vitest 后未改业务代码。
+- Actions #91 / run `34786345775`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、部署包构建/校验/Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
+- 真实 BaoTa 2026091225、真实 OpenList storage discovery/copy/rename/quarantine、真实 Alias 负载均衡仍待验证。
+
 ## 2026-09-14 — 2026091224 Admin IPA traceability + dynamic database sync rules
 
 - IPA 元数据“解析结果库”新增管理员可见下载地址列。地址在请求时按 `sourceSlug + legacyId` 从对应 MySQL 软件源当前 `bt1a` 读取，不写入 OpenList v3 安全 `appRefs` 缓存，也不进入公开 API。

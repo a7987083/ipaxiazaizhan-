@@ -2,31 +2,42 @@
 
 - Repo: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
-- Candidate: `2026091224`
-- Functional code commit: `4b1270e838abd9bc726cf88b6f46a8702343d3a5`
-- Contract follow-up commit: `f28644175de5567343750f6a1260c1baa4707128`
-- Baseline: `2026091223` / `6a52dc8126f37decb7e87d496ab1cdf7337eeced`
-- GitHub Actions: #79 / run `34784361324` passed for all executed validation/package steps.
-- Real BaoTa/runtime/MySQL verification for 2026091224: pending.
+- Candidate: `2026091225`
+- Functional code commit: `5cba24b3b32307ea892596329205f973126498fe`
+- Baseline: `2026091224` / `271c5aca4c83237c28fdfe5fcf4a3c6accf95515`
+- Functional-code GitHub Actions: #91 / run `34786345775` passed for all executed validation/package steps.
+- Real BaoTa/OpenList multi-drive verification for 2026091225: pending.
 
-## What 1224 changes
+## What 1225 adds
 
-1. IPA 元数据解析结果库新增下载地址列。管理员接口实时从对应 MySQL App 行读取当前 `bt1a`，不会把下载地址写入 OpenList 安全 `appRefs`，也不会新增到公开 API。
-2. 缺失 IPA 条目显示原数据库下载地址 + 预期 OpenList 路径，方便直接定位缺失原因。
-3. 版本列明确区分“源版本 / IPA 版本 / Build”，不再用 `1.2.5 (40)` 这类容易误解的写法。
-4. 数据同步从固定字段行升级成动态映射规则：默认规则可改、可删除，也可新增最多 50 条规则。
-5. 每条规则分别选择：是否启用、写入内容、真实数据库列、写入策略。
-6. 支持“IPA 下载链接”数据来源，可映射到 `bt1a`；选择常见列会自动给出来源建议，但管理员仍可手工调整。
-7. 2026091222/1223 的旧 `mappings` 配置会自动转换为动态 `rules`，已有配置不会因升级直接丢失。
-8. 开关文案改为“允许手动写入数据库”和“IPA 解析成功后自动写入数据库”，并明确解释实际行为。
-9. 写入安全条件不变：仅当前成功解析、`md5 === parsedMd5`、目标列真实存在、无重复目标列；只 UPDATE 已有 App，不 INSERT 新 App。
+1. 新增后台“云盘副本”模块，直接读取当前 OpenList 的挂载存储列表。
+2. 管理员从实体挂载中选择参与副本管理的网盘，并为每个盘设置副本根目录和独立“可写”权限。
+3. 以启用 MySQL 软件源当前 `bt1a` 作为权威期望清单，对多个实体网盘递归对账：已有、缺失、多余。
+4. 对账结果提供 App × 网盘副本矩阵；可看到例如天翼 400/400、阿里 80/400 缺 320。
+5. 缺失副本可通过 OpenList `/api/fs/copy` 从已有副本的盘复制到可写目标盘；ZONOE 不下载/上传 IPA 数据。
+6. 如果数据库期望文件缺失，但同目录发现唯一一个 MD5 相同的多余 IPA，则给出“名称修复”建议；人工确认后调用 `/api/fs/rename`。
+7. 数据库不存在的多余 IPA 不提供永久删除；人工确认后只能移动到 `<副本根目录>/.zonoe-quarantine/<日期>/...` 隔离区。
+8. Alias 存储不会被误选为实体副本盘。后台会发现 Alias，并检查其配置中是否覆盖所选副本根目录；Alias 的真正负载均衡策略仍由 OpenList 原生驱动负责。
+9. OpenList Token 文案不再叫“只读 Token”：元数据功能可只给读取权限，但副本管理的存储发现/复制/改名/隔离需要对应权限。
+
+## Safety model
+
+- 副本管理默认关闭。
+- 允许复制、允许名称修复、允许隔离三个权限独立，默认关闭。
+- 每个实体盘还要单独标记“可写”。
+- Alias 不能作为 copy/rename/quarantine 实体盘。
+- 改名和隔离执行前重新跑对账确认目标仍然有效。
+- 永久删除 API 在 1225 不存在。
+- 单次同步最多提交 50 个复制任务；后台默认按钮提交 20 个。
+- 单盘扫描最多 20,000 个 IPA / 1,000 个目录，避免配置错误导致无限递归。
 
 ## CI verification
 
-Actions #78 首轮只因 1223 遗留的精确 UI 文案 contract 不匹配而失败；当轮所有 1224 新增动态规则和管理员下载地址 contract 均通过。随后正常追加 contract 修复提交，没有改写历史。
+Actions #89 首次失败只因为新 contract 文件误用了 Node `node:test`，三条副本算法子测试本身均通过；修正为 Vitest 后不改业务逻辑。
 
-Actions #79 / run `34784361324` passed:
+Actions #91 / run `34786345775` passed:
 - Integration tests
+- OpenList replica contract tests
 - Production build
 - Native API smoke
 - Native frontend static smoke
@@ -36,8 +47,8 @@ Actions #79 / run `34784361324` passed:
 - GitHub updater contract
 - deployment package build / validation / artifact upload
 
-`release-e2e` 按现有 workflow 条件 skipped。因此 2026091224 是 **CI/package verified，尚未真实 BaoTa/MySQL-writeback verified**。
+`release-e2e` 按现有 workflow 条件 skipped。因此 2026091225 是 **CI/package verified，尚未真实 BaoTa/OpenList copy/rename/quarantine/Alias verified**。
 
 ## Recommended real deployment validation
 
-在线更新到 2026091224 后先检查 IPA 元数据页：解析库每行应有下载地址，缺失条目也应有数据库下载地址，Build 应独立标明。然后进入数据同步，确认默认规则可编辑/删除并能新增规则；选择数据库列 `bt1a` 时应建议“IPA 下载链接”。先保持“IPA 解析成功后自动写入数据库”关闭，用预览和少量手动写入验证真实数据库后再考虑自动模式。
+在线更新到 2026091225 后，先不要开启任何写权限。进入“云盘副本”，确认能读取天翼/阿里等实体挂载和 Alias。只勾选实体盘，填写实际存放 IPA 的根目录，运行“开始多网盘对账”，核对数据库期望总数和每盘已有/缺失/多余数量。确认无误后，只给一个非关键目标盘勾选“可写 + 允许副本复制”，先提交一个小批次。复制完成后重新对账确认。改名必须先看到 MD5 建议；多余文件先隔离，不永久删除。Alias 最终下载分流继续在 OpenList 中使用原生读取负载均衡配置。
