@@ -1,5 +1,21 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091226 Account-independent IPA metadata persistence
+
+- 修复更换 OpenList/云盘账号、挂载路径或下载路径后，之前 IPA 解析结果从解析库消失的问题。
+- 根因确认：旧 v3 缓存以 `apiPath` 作为解析结果身份，同步只通过 `old.files[apiPath]` 继承旧解析；账号/路径变化后同一 IPA 会被当作新路径，活动缓存又会按当前引用重建。
+- 新增持久 `openlist-ipa-metadata-library.json`，以标准化 MD5 作为内容身份，并保存文件大小作为额外防误关联保护。
+- 持久库只保存安全包内字段：名称、版本、Build、Bundle ID、MinimumOSVersion、Executable；不保存 OpenList Token、`raw_url` 或下载地址。
+- 服务启动时先将当前仍有效的 v3 解析结果迁移进 MD5 库，再启动 OpenList 定时器，避免升级后第一次同步先覆盖旧结果。
+- 当前文件在新账号/新路径下只要 MD5 相同且已知大小不冲突，就可从持久库恢复旧解析结果；真正不同 MD5 不复用。
+- stale `parsedMd5`、解析失败和缺失文件不会进入持久 MD5 库。
+- OpenList 目录缓存现在在服务启动时主动失效一次，并在 OpenList 配置更新时间变化时再次失效，防止同一 OpenList 地址更换 Token/账号后继续读取旧账号的目录缓存。
+- 后台“本地缓存”新增 `MD5 解析库` 数量和体积；“清空 IPA 解析缓存/全部缓存”明确同时清空活动路径缓存和持久 MD5 解析库，但不会删除云盘 IPA 或 MySQL 数据。
+- 新增 account-switch contract tests：v3 → MD5 迁移、同 IPA 新账号/新路径复用、不同 MD5 拒绝、相同 MD5 但大小冲突拒绝、stale/failed 不迁移，以及启动顺序/目录缓存失效契约。
+- Actions #103 / run `34787233314`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、部署包构建/校验/Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
+- 已在旧版本被覆盖掉且没有外部备份的解析数据无法凭空恢复，需要重新解析一次；进入 1226 MD5 库后，未来账号/路径变化不再依赖旧路径。
+- 真实 BaoTa/OpenList 账号切换同 MD5 复用仍待 E2E 验证。
+
 ## 2026-09-14 — 2026091225 OpenList multi-drive replica management
 
 - 新增后台“云盘副本”模块，读取 OpenList 管理存储列表并区分实体网盘与 Alias 分流盘。
