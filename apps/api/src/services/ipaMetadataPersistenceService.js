@@ -7,9 +7,7 @@ import {
 import {
   getParsedMetadataByMd5,
   loadAndSeedIpaMetadataLibrary,
-  normalizeMd5,
-  rememberParsedMetadata,
-  writeIpaMetadataLibrary
+  normalizeMd5
 } from './ipaMetadataLibrary.js';
 
 let timer=null;
@@ -19,17 +17,14 @@ let initialized=false;
 
 export function hydrateIpaCacheByMd5(cache,library){
   const files={...(cache?.files||{})};
-  let reused=0,changed=false,nextLibrary=library;
+  let reused=0,changed=false;
   for(const [apiPath,file] of Object.entries(files)){
     if(!file||file.missing)continue;
     const md5=normalizeMd5(file.md5);
     if(!md5)continue;
     const currentParsed=Boolean(file.parsed&&normalizeMd5(file.parsedMd5||file.md5)===md5&&!file.parseError);
-    if(currentParsed){
-      nextLibrary=rememberParsedMetadata(nextLibrary,{md5,size:file.size,parsed:file.parsed,parsedAt:file.parsedAt,source:'active-cache'});
-      continue;
-    }
-    const saved=getParsedMetadataByMd5(nextLibrary,md5,file.size);
+    if(currentParsed)continue;
+    const saved=getParsedMetadataByMd5(library,md5,file.size);
     if(!saved)continue;
     files[apiPath]={
       ...file,
@@ -40,10 +35,9 @@ export function hydrateIpaCacheByMd5(cache,library){
       nextParseAfter:null,
       metadataReusedByMd5:true
     };
-    nextLibrary=rememberParsedMetadata(nextLibrary,{md5,size:file.size,parsed:saved.parsed,parsedAt:saved.parsedAt,source:'md5-reuse'});
     reused+=1;changed=true;
   }
-  return {cache:{...cache,files},library:nextLibrary,reused,changed};
+  return {cache:{...cache,files},library,reused,changed};
 }
 
 async function invalidateDirectoryCacheOnConfigChange(){
@@ -70,11 +64,9 @@ export async function reconcileIpaMetadataPersistence(){
     await invalidateDirectoryCacheOnConfigChange();
     if(['queued','running'].includes(String(task?.state||'')))return {busy:true};
     const cache=await readOpenListIpaCache();
-    let library=await loadAndSeedIpaMetadataLibrary(cache);
+    const library=await loadAndSeedIpaMetadataLibrary(cache);
     const hydrated=hydrateIpaCacheByMd5(cache,library);
-    library=hydrated.library;
     if(hydrated.changed)await writeOpenListIpaCache(hydrated.cache);
-    await writeIpaMetadataLibrary(library);
     return {busy:false,reused:hydrated.reused,libraryEntries:Object.keys(library.entries||{}).length};
   }finally{running=false}
 }
