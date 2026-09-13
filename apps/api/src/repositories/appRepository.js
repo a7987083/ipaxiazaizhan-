@@ -53,10 +53,11 @@ export function publicIpaMetadata(cache,appId){
   const file=fileForApp(cache,appId);
   if(!file) return {status:'unknown',verified:false,parsed:false};
   const currentParsed=Boolean(file.parsed&&(!file.md5||!file.parsedMd5||file.parsedMd5===file.md5));
-  const status=file.parseError?'failed':currentParsed?'parsed':'pending';
-  const meta=file.parsed||{};
+  const usableParsed=Boolean(currentParsed&&!file.parseError);
+  const status=file.parseError?'failed':usableParsed?'parsed':'pending';
+  const meta=usableParsed?(file.parsed||{}):{};
   return {
-    status,verified:Boolean(file.md5),parsed:currentParsed,parsedAt:file.parsedAt||null,modified:file.modified||null,
+    status,verified:Boolean(file.md5),parsed:usableParsed,parsedAt:usableParsed?(file.parsedAt||null):null,modified:file.modified||null,
     fileSize:Number(file.size||0)||0,fileName:String(file.name||''),packageName:String(meta.name||''),
     packageVersion:String(meta.version||''),packageBuild:String(meta.build||''),bundleId:String(meta.bundle_id||''),
     minimumIos:String(meta.minimum_ios||''),executable:String(meta.executable||''),parseError:String(file.parseError||'')
