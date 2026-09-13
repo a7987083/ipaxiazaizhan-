@@ -12,12 +12,22 @@
 - 新增写回预览、手动确认同步、写回历史；历史不保存 MySQL 密码或 OpenList Token。
 - 新增后台自动写回调度器。只有管理员显式开启“允许写回 + 自动写回”的软件源才参与，且仍逐字段遵守映射策略；相同值不会制造无意义 UPDATE。
 - 新增 contract tests 覆盖默认关闭、重复目标列、字段禁用、empty/preview 策略和 unchanged no-op。
+- 后台拆分模块时保留原双通道在线更新语义；新增独立 `AdminUpdaterPanel.jsx`，contract test 改为跟随模块化结构。
 
-### 验证状态
+### CI 修复记录
 
-- 新增后端 service/router/test 与修改后的 `app.js` 本地 `node --check` 通过。
-- 前端 Production build、Vitest、Native smoke、BaoTa contract、MySQL multi-source contract、GitHub updater contract：等待当前 HEAD GitHub Actions 验证。
-- 真实 BaoTa / 真实 MySQL 写回尚未执行。首次实机验证必须先保持软件源写回关闭，只运行 Preview。
+- 首次 1222 Actions #57 在 Integration tests 失败；根因不是写回逻辑，而是旧 updater contract 仍只读取 `Admin.jsx`，而在线更新 UI 已被拆到子模块。
+- 新写回 contract 在该轮已全部通过。
+- 随后恢复“检查两个通道 / Stable Release”完整 UI，并让 updater contract 检查新的真实组件，而不是通过注释规避测试。
+
+### 最终验证状态
+
+- Functional code HEAD：`eec0b7b3fe1c4f8775928e3d6375421f4fc7e9fd`。
+- GitHub Actions #60 / run `34778232661`：成功。
+- Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract 均成功。
+- `package-and-release` 成功：前端/API 打包、release metadata、部署包构建/校验、CI Artifact 上传成功；GitHub Release 发布步骤按条件 skipped。
+- `release-e2e` 按现有 workflow 条件 skipped。
+- 真实 BaoTa 2026091222 部署、真实 MySQL 写回尚未执行，因此当前状态是 **CI/package verified / real runtime+writeback pending**。
 
 ## 2026-09-14 — 2026091221 Public IPA metadata discovery
 
@@ -28,12 +38,7 @@
 - 前台 App 列表增加 IPA 状态与目标 iOS 筛选；卡片显示包内版本/Build/最低 iOS；详情页把“IPA 已解析”和“MD5 已校验”拆开。
 - 修正 stale-cache 边界：文件 MD5 变化或解析失败后，旧 Bundle ID/包内版本/最低 iOS 不再作为当前公开元数据返回，也不会被元数据搜索命中；状态仍显示 pending/failed。
 - 新增 contract test 覆盖版本号数值比较、stale MD5 -> pending、失败解析隔离、Bundle ID/包内字段搜索、目标 iOS 兼容筛选和解析状态筛选。
-- 同步更新 API 与长期项目状态文档。
-
-### 验证状态
-
-- GitHub Actions #55/#56 通过；Integration tests、Production build、Native API/Frontend smoke、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、部署包构建/校验均成功。
-- 真实 BaoTa 2026091221 E2E 尚未执行，因此状态为 **CI verified / runtime pending**。
+- GitHub Actions #55/#56 通过；真实 BaoTa 2026091221 E2E 尚未执行。
 
 ## 2026-09-14 — 2026091220 IPA parse results explorer
 

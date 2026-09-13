@@ -8,8 +8,9 @@
     "ci": "passed"
   },
   "phase": "Phase 1.8 Controlled IPA Write-Back",
-  "phase_status": "implementation_complete_ci_pending",
+  "phase_status": "ci_passed_real_runtime_pending",
   "production_verified": false,
+  "functional_code_commit": "eec0b7b3fe1c4f8775928e3d6375421f4fc7e9fd",
   "features": {
     "chinese_site_settings_form": true,
     "local_cache_management": true,
@@ -34,10 +35,21 @@
   },
   "verification": {
     "baseline_2026091221_ci": "passed",
-    "local_new_backend_syntax": "passed",
-    "current_head_ci": "pending",
+    "github_actions_run": 34778232661,
+    "github_actions_run_number": 60,
+    "integration_tests": "passed",
+    "production_build": "passed",
+    "native_api_smoke": "passed",
+    "native_frontend_static_smoke": "passed",
+    "shell_validation": "passed",
+    "baota_native_contract": "passed",
+    "mysql_multi_source_contract": "passed",
+    "github_updater_contract": "passed",
+    "deployment_package_build_and_validation": "passed",
+    "artifact_upload": "passed",
+    "release_e2e": "skipped_by_workflow_condition",
     "real_baota_e2e": "pending",
     "real_mysql_writeback": "pending"
   },
-  "next_task": "Wait for CI, deploy 2026091222 to BaoTa, preview write-back against a real source with source-level write-back still disabled, then enable one low-risk field and validate one existing App."
+  "next_task": "Deploy 2026091222 to BaoTa. Keep write-back disabled first, inspect real table columns and run Preview. Then enable one low-risk mapped field and manually apply to a small number of existing Apps before considering auto-apply."
 }
