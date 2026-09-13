@@ -1,5 +1,5 @@
 import { AppError } from '../utils/http.js';
-import { listMysqlSources, getMysqlSourceBySlug } from '../storage/controlStore.js';
+import { listMysqlSources, getMysqlSourceBySlug, readOpenListIpaCache } from '../storage/controlStore.js';
 import { fromHex, parseTsv, runMysql, safeIdentifier, sqlInt, sqlText } from '../services/mysqlCli.js';
 
 function normalizePagination(page=1,pageSize=20){ page=Math.max(1,Number(page)||1); pageSize=Math.min(100,Math.max(1,Number(pageSize)||20)); return {page,pageSize,offset:(page-1)*pageSize}; }
@@ -32,6 +32,27 @@ function mapRow(source,cols){
     release_date:epochIso(updatetime||createtime),changelog:keywords||'',created_at:epochIso(createtime),updated_at:epochIso(updatetime||createtime),
     _updatedEpoch:updatedEpoch,tags:[],screenshots:[]
   };
+}
+
+async function enrichFromIpaCache(items){
+  let cache;
+  try { cache=await readOpenListIpaCache(); } catch { return items; }
+  return items.map(app=>{
+    const p=cache.apps?.[app.id];
+    const f=p?cache.files?.[p]:null;
+    if(!f || f.missing) return app;
+    const meta=f.parsed||{};
+    return {
+      ...app,
+      file_size:Number(f.size||0)||app.file_size,
+      bundle_id:meta.bundle_id||app.bundle_id,
+      min_ios:meta.minimum_ios||app.min_ios,
+      package_name:meta.name||'',
+      package_version:meta.version||'',
+      package_build:meta.build||'',
+      ipa_metadata:{verified:Boolean(f.md5),parsed:Boolean(f.parsed),parsed_at:f.parsedAt||null,modified:f.modified||null}
+    };
+  });
 }
 
 function selectColumns(table){
@@ -85,7 +106,8 @@ export async function listApps({q='',category,source,sort='updated',page=1,pageS
   settled.forEach((r,i)=>{ if(r.status==='fulfilled'){total+=r.value.count;items.push(...r.value.items)} else sourceErrors.push({source:sources[i].slug,message:r.reason?.message||'查询失败'}) });
   if(settled.every(x=>x.status==='rejected')) throw new AppError(503,'MYSQL_SOURCES_UNAVAILABLE','所有 MySQL 软件源均不可用',sourceErrors);
   items.sort(jsSort(sort));
-  const sliced=items.slice(p.offset,p.offset+p.pageSize).map(({_updatedEpoch,...x})=>x);
+  const base=items.slice(p.offset,p.offset+p.pageSize).map(({_updatedEpoch,...x})=>x);
+  const sliced=await enrichFromIpaCache(base);
   return {items:sliced,total,...p,sourceErrors};
 }
 
@@ -108,17 +130,22 @@ export async function getApp(idOrSlug,publishedOnly=true) {
     if(!row||row.enabled===false) return null;
     const app=await rawApp(sourceView(row),parsed.id);
     if(!app || (publishedOnly&&app.status!=='published')) return null;
-    const {_updatedEpoch,...publicApp}=app; return publicApp;
+    const {_updatedEpoch,...publicApp}=app;
+    return (await enrichFromIpaCache([publicApp]))[0];
   }
   if(/^\d+$/.test(String(idOrSlug))){
-    const sources=await enabledSources(); if(sources.length===1){ const app=await rawApp(sources[0],Number(idOrSlug)); if(app){const {_updatedEpoch,...publicApp}=app;return publicApp;} }
+    const sources=await enabledSources();
+    if(sources.length===1){
+      const app=await rawApp(sources[0],Number(idOrSlug));
+      if(app){ const {_updatedEpoch,...publicApp}=app; return (await enrichFromIpaCache([publicApp]))[0]; }
+    }
   }
   return null;
 }
 
 export async function listVersions(appId,_includeDraft=false) {
   const app=await getApp(appId,true); if(!app)return [];
-  return [{id:app.version_id,app_id:app.id,version:app.version||'',build:'',file_size:app.file_size,min_ios:null,changelog:app.changelog||'',status:'published',release_date:app.release_date||app.updated_at||new Date().toISOString(),download_count:app.download_count}];
+  return [{id:app.version_id,app_id:app.id,version:app.version||'',build:app.package_build||'',file_size:app.file_size,min_ios:app.min_ios,changelog:app.changelog||'',status:'published',release_date:app.release_date||app.updated_at||new Date().toISOString(),download_count:app.download_count,package_version:app.package_version||''}];
 }
 
 export async function sourceStatistics(){

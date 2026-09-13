@@ -7,7 +7,7 @@
     "postinstall": "bash scripts/install-admin-updater.sh",
     "dev": "npm run dev -w apps/api & npm run dev -w apps/web",
     "build": "npm run build -w apps/api && npm run build -w apps/web",
-    "test": "bash -n scripts/admin-update-worker.sh scripts/install-admin-updater.sh && npm run test -w apps/api",
+    "test": "python3 -m py_compile scripts/ipa-range-info.py && bash -n scripts/admin-update-worker.sh scripts/install-admin-updater.sh && npm run test -w apps/api",
     "lint": "npm run lint -w apps/api && npm run lint -w apps/web"
   },
   "engines": {"node": ">=22"}

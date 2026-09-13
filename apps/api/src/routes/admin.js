@@ -5,8 +5,9 @@ import { asyncHandler,ok,AppError } from '../utils/http.js';
 import { csrfToken } from '../utils/crypto.js';
 import { login,changePassword } from '../services/authService.js';
 import { getOnlineUpdateStatus,queueOnlineUpdate } from '../services/updateService.js';
+import { getOpenListIpaStatus,syncOpenListIpaMetadata,testOpenListConnection } from '../services/openListMetadataService.js';
 import { testMysqlSource } from '../services/mysqlCli.js';
-import { getMysqlSource } from '../storage/controlStore.js';
+import { getMysqlSource,saveOpenListConfig } from '../storage/controlStore.js';
 import { loginLimiter } from '../middleware/rateLimit.js';
 import { requireAdmin,requireCsrf } from '../middleware/auth.js';
 import * as apps from '../repositories/appRepository.js';
@@ -15,6 +16,9 @@ import * as admin from '../repositories/adminRepository.js';
 const r=Router();
 const sourceSchema=z.object({
   name:z.string().min(1),slug:z.string().min(1).optional(),host:z.string().min(1),port:z.coerce.number().int().positive().max(65535).default(3306),database:z.string().min(1),username:z.string().min(1),password:z.string().optional(),table:z.string().regex(/^[A-Za-z0-9_]+$/).default('fa_category'),enabled:z.boolean().optional(),priority:z.coerce.number().int().optional(),writeStats:z.boolean().optional()
+});
+const openListSchema=z.object({
+  enabled:z.boolean().optional(),url:z.string().url().optional(),token:z.string().optional(),publicPathPrefix:z.string().min(1).optional(),apiBasePath:z.string().min(1).optional()
 });
 const cookieBase={httpOnly:true,sameSite:'lax',secure:env.COOKIE_SECURE,maxAge:12*60*60*1000};
 
@@ -58,6 +62,22 @@ r.delete('/sources/:id',asyncHandler(async(req,res)=>ok(res,{deleted:await admin
 r.post('/sources/:id/test',asyncHandler(async(req,res)=>{
   const src=await getMysqlSource(Number(req.params.id),{withSecrets:true}); if(!src)throw new AppError(404,'SOURCE_NOT_FOUND','软件源不存在');
   try{ const connected=await testMysqlSource(src.config); ok(res,{connected}); }catch(e){ throw new AppError(400,'SOURCE_CONNECT_FAILED',`MySQL 连接失败：${e.message}`); }
+}));
+
+r.get('/openlist',asyncHandler(async(_req,res)=>ok(res,await getOpenListIpaStatus())));
+r.put('/openlist',asyncHandler(async(req,res)=>{
+  const p=openListSchema.parse(req.body||{});
+  try { ok(res,await saveOpenListConfig(p)); }
+  catch(e){ if(e?.code==='OPENLIST_TOKEN_REQUIRED') throw new AppError(400,'OPENLIST_TOKEN_REQUIRED',e.message); throw e; }
+}));
+r.post('/openlist/test',asyncHandler(async(_req,res)=>{
+  try { ok(res,await testOpenListConnection()); }
+  catch(e){ throw new AppError(502,'OPENLIST_CONNECT_FAILED',`OpenList 连接失败：${e.message}`); }
+}));
+r.post('/openlist/sync',asyncHandler(async(req,res)=>{
+  const p=z.object({parseLimit:z.coerce.number().int().min(0).max(20).default(0)}).parse(req.body||{});
+  try { ok(res,await syncOpenListIpaMetadata({parseLimit:p.parseLimit})); }
+  catch(e){ throw new AppError(502,'OPENLIST_SYNC_FAILED',`OpenList 同步失败：${e.message}`); }
 }));
 
 r.get('/statistics',asyncHandler(async(_req,res)=>ok(res,await admin.statistics())));

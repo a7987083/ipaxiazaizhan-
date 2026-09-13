@@ -8,6 +8,8 @@ const CONTROL_DIR = env.CONTROL_DIR;
 const ADMIN_FILE = path.join(CONTROL_DIR, 'admin.json');
 const SETTINGS_FILE = path.join(CONTROL_DIR, 'settings.json');
 const SOURCES_FILE = path.join(CONTROL_DIR, 'mysql-sources.json');
+const OPENLIST_FILE = path.join(CONTROL_DIR, 'openlist.json');
+const IPA_CACHE_FILE = path.join(CONTROL_DIR, 'openlist-ipa-cache.json');
 const DOWNLOAD_DIR = path.join(CONTROL_DIR, 'downloads');
 
 let writeQueue = Promise.resolve();
@@ -53,6 +55,20 @@ function publicSource(row) {
     created_at: row.createdAt,
     updated_at: row.updatedAt,
     base_url: cfg.database ? `${cfg.host||'127.0.0.1'}:${cfg.port||3306}/${cfg.database}` : ''
+  };
+}
+
+function publicOpenList(row) {
+  let cfg={};
+  try { cfg=decryptJson(row?.configEncrypted); } catch {}
+  return {
+    enabled: row?.enabled !== false,
+    url: cfg.url || '',
+    publicPathPrefix: cfg.publicPathPrefix || '/d/a/app/',
+    apiBasePath: cfg.apiBasePath || '/',
+    tokenConfigured: Boolean(cfg.token),
+    createdAt: row?.createdAt || null,
+    updatedAt: row?.updatedAt || null
   };
 }
 
@@ -183,6 +199,51 @@ export async function deleteMysqlSource(id) {
   await writeJson(SOURCES_FILE,next); return true;
 }
 
+export async function getOpenListConfig({withSecret=false}={}) {
+  await ensureControlInitialized();
+  const row=await readJson(OPENLIST_FILE, null);
+  if(!row) return withSecret ? null : publicOpenList(null);
+  if(!withSecret) return publicOpenList(row);
+  let config={};
+  try { config=decryptJson(row.configEncrypted); } catch {}
+  return {...row,config};
+}
+
+export async function saveOpenListConfig(data) {
+  await ensureControlInitialized();
+  const old=await readJson(OPENLIST_FILE, null);
+  let oldCfg={};
+  try { if(old?.configEncrypted) oldCfg=decryptJson(old.configEncrypted); } catch {}
+  const token=String(data.token||oldCfg.token||'').trim();
+  if(!token) throw Object.assign(new Error('首次配置 OpenList 必须填写只读 Token'),{code:'OPENLIST_TOKEN_REQUIRED'});
+  const now=new Date().toISOString();
+  const cfg={
+    url:String(data.url??oldCfg.url??'').trim().replace(/\/+$/,''),
+    token,
+    publicPathPrefix:String(data.publicPathPrefix??oldCfg.publicPathPrefix??'/d/a/app/').trim() || '/d/a/app/',
+    apiBasePath:String(data.apiBasePath??oldCfg.apiBasePath??'/').trim() || '/'
+  };
+  const row={
+    enabled:data.enabled!==undefined?!!data.enabled:(old?.enabled!==false),
+    configEncrypted:encryptJson(cfg),
+    createdAt:old?.createdAt||now,
+    updatedAt:now
+  };
+  await writeJson(OPENLIST_FILE,row);
+  return publicOpenList(row);
+}
+
+export async function readOpenListIpaCache() {
+  await ensureControlInitialized();
+  return readJson(IPA_CACHE_FILE,{version:1,files:{},apps:{},lastSync:null});
+}
+
+export async function writeOpenListIpaCache(value) {
+  const normalized={version:1,files:value?.files||{},apps:value?.apps||{},lastSync:value?.lastSync||null};
+  await writeJson(IPA_CACHE_FILE,normalized);
+  return normalized;
+}
+
 export async function appendDownloadEvent(event) {
   await ensureControlInitialized();
   const day=new Date().toISOString().slice(0,10);
@@ -196,4 +257,4 @@ export async function countTodayDownloads() {
   catch(e){ if(e?.code==='ENOENT') return 0; throw e; }
 }
 
-export { CONTROL_DIR, DOWNLOAD_DIR };
+export { CONTROL_DIR, DOWNLOAD_DIR, IPA_CACHE_FILE };
