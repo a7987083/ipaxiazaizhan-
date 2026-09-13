@@ -8,6 +8,7 @@ import publicRoutes from './routes/public.js';
 import adminRoutes from './routes/admin.js';
 import adminEnhancementRoutes from './routes/adminEnhancements.js';
 import adminMetadataRoutes from './routes/adminMetadataRoutes.js';
+import adminReplicaRoutes from './routes/adminReplicaRoutes.js';
 import { startWriteBackScheduler } from './services/ipaWriteBackService.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { notFound,errorHandler } from './middleware/error.js';
@@ -27,6 +28,7 @@ export function createApp(){
   app.use('/api/v1/admin',adminRoutes);
   app.use('/api/v1/admin',adminEnhancementRoutes);
   app.use('/api/v1/admin',adminMetadataRoutes);
+  app.use('/api/v1/admin',adminReplicaRoutes);
   startWriteBackScheduler();
   app.use(notFound); app.use(errorHandler); return app;
 }
