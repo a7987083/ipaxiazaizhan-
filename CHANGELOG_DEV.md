@@ -1,5 +1,12 @@
 # Development Changelog
 
+## 2026-09-13 — 2026091217 Online update canary
+
+- 仅用于验证 2026091216 → 2026091217 的真实在线更新链路。
+- 不改业务功能；通过版本号变化触发完整的 Preview 下载、备份、安装、配置恢复、API 重启、健康检查与动态进度流程。
+- 成功标准：更新后 VERSION=2026091217，后台/MySQL 软件源/OpenList/站点设置等持久配置保持不变，更新状态最终为 success。
+- 若更新失败，应由 1216 更新器回滚，并在后台状态与 data/update-runtime/admin-update.log 中留下可诊断信息。
+
 ## 2026-09-13 — 2026091208 Multi-MySQL software sources + admin operations
 
 - 后台保留并完善 GitHub「在线更新」：检查版本、一键更新、状态轮询，root systemd worker 继续与 Web API 隔离。
