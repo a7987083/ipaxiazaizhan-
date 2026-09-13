@@ -40,20 +40,25 @@ export function hydrateIpaCacheByMd5(cache,library){
   return {cache:{...cache,files},library,reused,changed};
 }
 
+async function clearDirectoryCache(){
+  const current=await readOpenListDirectoryCache();
+  if(current?.scopeKey||Object.keys(current?.directories||{}).length){
+    await writeOpenListDirectoryCache({version:1,scopeKey:'',directories:{}});
+    return true;
+  }
+  return false;
+}
+
 async function invalidateDirectoryCacheOnConfigChange(){
   const cfg=await getOpenListConfig();
   const marker=String(cfg?.updatedAt||'');
   if(!initialized){
     lastConfigUpdatedAt=marker;
-    return false;
+    return clearDirectoryCache();
   }
   if(marker===lastConfigUpdatedAt)return false;
   lastConfigUpdatedAt=marker;
-  const current=await readOpenListDirectoryCache();
-  if(current?.scopeKey||Object.keys(current?.directories||{}).length){
-    await writeOpenListDirectoryCache({version:1,scopeKey:'',directories:{}});
-  }
-  return true;
+  return clearDirectoryCache();
 }
 
 export async function reconcileIpaMetadataPersistence(){
@@ -61,13 +66,13 @@ export async function reconcileIpaMetadataPersistence(){
   running=true;
   try{
     const task=await readOpenListTask();
-    await invalidateDirectoryCacheOnConfigChange();
-    if(['queued','running'].includes(String(task?.state||'')))return {busy:true};
+    const directoryCacheInvalidated=await invalidateDirectoryCacheOnConfigChange();
+    if(['queued','running'].includes(String(task?.state||'')))return {busy:true,directoryCacheInvalidated};
     const cache=await readOpenListIpaCache();
     const library=await loadAndSeedIpaMetadataLibrary(cache);
     const hydrated=hydrateIpaCacheByMd5(cache,library);
     if(hydrated.changed)await writeOpenListIpaCache(hydrated.cache);
-    return {busy:false,reused:hydrated.reused,libraryEntries:Object.keys(library.entries||{}).length};
+    return {busy:false,reused:hydrated.reused,libraryEntries:Object.keys(library.entries||{}).length,directoryCacheInvalidated};
   }finally{running=false}
 }
 
@@ -75,7 +80,7 @@ export async function startIpaMetadataPersistence(){
   if(timer)return;
   await reconcileIpaMetadataPersistence();
   initialized=true;
-  // Account/token/path changes are uncommon; a 1s guard keeps directory cache and MD5 metadata coherent without touching IPA bytes.
+  // OpenList account/token/path changes are uncommon; a 1s guard keeps cache identity coherent without touching IPA bytes.
   timer=setInterval(()=>reconcileIpaMetadataPersistence().catch(e=>console.error('IPA metadata persistence:',e?.message||e)),1000);
   timer.unref?.();
 }
