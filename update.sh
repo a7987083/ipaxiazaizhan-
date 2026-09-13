@@ -41,9 +41,10 @@ snapshot_dependencies(){
     src="$ROOT/$rel"; [[ -d "$src" ]] || continue
     dst="$DEPS_ROLLBACK/$rel"
     mkdir -p "$(dirname "$dst")"
-    # Hard-link snapshot is fast and does not double disk usage. If the filesystem
-    # does not support it, fall back to a normal copy.
-    if ! cp -al "$src" "$dst" 2>/dev/null; then
+    # Keep the rollback snapshot independent from the live dependency tree.
+    # Hard links are deliberately avoided: package managers may replace or
+    # rewrite files during npm ci, and the rollback copy must remain immutable.
+    if ! cp -a --reflink=auto "$src" "$dst" 2>/dev/null; then
       rm -rf "$dst"
       cp -a "$src" "$dst"
     fi

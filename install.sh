@@ -4,7 +4,7 @@ set -Eeuo pipefail
 log(){ printf '\033[1;34m[ZONOE]\033[0m %s\n' "$*"; }
 warn(){ printf '\033[1;33m[WARN]\033[0m %s\n' "$*" >&2; }
 die(){ printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
-need(){ command -v "$1" >/dev/null 2>&1 || die "缺少命令: $1"; }
+need(){ command -v "$1" >/dev/null 2>&1 || die "缺少命�: $1"; }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$ROOT/data"
@@ -102,8 +102,31 @@ INFO
   fi
 }
 
+api_runtime_import_smoke(){
+  (cd "$ROOT/apps/api" && node --input-type=module -e "await import('./src/app.js')")
+}
+
+install_node_dependencies(){
+  log "安装 Node 依赖（root package-lock + npm ci）"
+  (cd "$ROOT"&&npm ci)
+
+  if api_runtime_import_smoke; then
+    log "API 运行时依赖校验通过"
+    return 0
+  fi
+
+  # 2026091217 exposed an update-only failure where npm ci returned success but
+  # the newly installed tree could not resolve express. Reinstall once from a
+  # completely clean dependency tree before touching systemd.
+  warn "API 运行时依赖校验失败，清理 node_modules 后重新安装一次"
+  rm -rf "$ROOT/node_modules" "$ROOT/apps/api/node_modules" "$ROOT/apps/web/node_modules"
+  (cd "$ROOT"&&npm ci)
+  api_runtime_import_smoke || die "API 运行时依赖校验失败（重新安装后仍无法加载依赖）"
+  log "API 运行时依赖重新安装后校验通过"
+}
+
 build_application(){
-  log "安装 Node 依赖（root package-lock + npm ci）"; (cd "$ROOT"&&npm ci)
+  install_node_dependencies
   log "执行 API 语法检查与 React Production Build"; (cd "$ROOT"&&npm run build)
   [[ -f "$ROOT/apps/web/dist/index.html" ]]||die "前端构建产物缺少 index.html"
   mkdir -p "$ROOT/public"

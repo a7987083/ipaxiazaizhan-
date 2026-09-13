@@ -74,11 +74,24 @@ import re,sys
 p=sys.argv[1]; start=int(sys.argv[2])
 try: lines=open(p,encoding='utf-8',errors='replace').read().splitlines()[start:]
 except Exception: lines=[]
-chosen=''
-for line in lines:
+ignore=[
+    '更新失败，恢复更新前 Node 依赖',
+    '部署失败，已尝试自动回滚',
+    '部署失败，开始自动回滚'
+]
+def score(s):
+    if any(x in s for x in ignore): return -1
+    if re.search(r'Cannot find package|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|EACCES|ENOENT|permission denied|SyntaxError|TypeError|ReferenceError|npm (ERR|error)|fatal',s,re.I): return 100
+    if re.search(r'\[ERROR\]',s,re.I) and '健康检查失败' not in s: return 80
+    if re.search(r'API 健康检查失败|健康检查失败|failed|502|503|失败',s,re.I): return 60
+    return 0
+candidates=[]
+for i,line in enumerate(lines):
     s=line.strip()
     if not s: continue
-    if re.search(r'\[ERROR\]|npm (ERR|error)|失败|failed|fatal|permission denied|EACCES|ENOENT|502|503',s,re.I): chosen=s
+    sc=score(s)
+    if sc>0: candidates.append((sc,i,s))
+chosen=max(candidates,key=lambda x:(x[0],x[1]))[2] if candidates else ''
 if not chosen and lines:
     chosen=next((x.strip() for x in reversed(lines) if x.strip()),'')
 chosen=re.sub(r'Bearer\s+\S+','Bearer ***',chosen,flags=re.I)
