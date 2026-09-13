@@ -106,31 +106,64 @@ api_runtime_import_smoke(){
   (cd "$ROOT/apps/api" && node --input-type=module -e "await import('./src/app.js')")
 }
 
+api_runtime_dependency_access_smoke(){
+  local probe='import fs from "node:fs"; const p=JSON.parse(fs.readFileSync("./package.json","utf8")); for (const name of Object.keys(p.dependencies||{})) await import(name);'
+  if id "$RUNTIME_USER" >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
+    (cd "$ROOT/apps/api" && runuser -u "$RUNTIME_USER" -- node --input-type=module -e "$probe")
+  else
+    (cd "$ROOT/apps/api" && node --input-type=module -e "$probe")
+  fi
+}
+
+normalize_runtime_artifact_permissions(){
+  local p
+  for p in "$ROOT/node_modules" "$ROOT/apps/api/node_modules" "$ROOT/apps/web/node_modules"; do
+    [[ -e "$p" ]] || continue
+    chmod -R a+rX "$p" 2>/dev/null || true
+  done
+}
+
 install_node_dependencies(){
+  local old_umask
+  old_umask="$(umask)"
+  # zonoe-updater.service intentionally runs with UMask=0027 for sensitive
+  # runtime files. npm artifacts are application code, so install them with a
+  # readable umask; otherwise root can import dependencies while the zonoe
+  # service user receives ERR_MODULE_NOT_FOUND for files such as express/index.js.
+  umask 0022
   log "安装 Node 依赖（root package-lock + npm ci）"
   (cd "$ROOT"&&npm ci)
+  normalize_runtime_artifact_permissions
+  umask "$old_umask"
 
-  if api_runtime_import_smoke; then
-    log "API 运行时依赖校验通过"
+  if api_runtime_import_smoke && api_runtime_dependency_access_smoke; then
+    log "API 运行时依赖校验通过（含 zonoe 用户可读性检查）"
     return 0
   fi
 
-  # 2026091217 exposed an update-only failure where npm ci returned success but
-  # the newly installed tree could not resolve express. Reinstall once from a
-  # completely clean dependency tree before touching systemd.
   warn "API 运行时依赖校验失败，清理 node_modules 后重新安装一次"
   rm -rf "$ROOT/node_modules" "$ROOT/apps/api/node_modules" "$ROOT/apps/web/node_modules"
+  old_umask="$(umask)"
+  umask 0022
   (cd "$ROOT"&&npm ci)
+  normalize_runtime_artifact_permissions
+  umask "$old_umask"
   api_runtime_import_smoke || die "API 运行时依赖校验失败（重新安装后仍无法加载依赖）"
-  log "API 运行时依赖重新安装后校验通过"
+  api_runtime_dependency_access_smoke || die "API 运行时依赖权限校验失败（zonoe 用户仍无法读取依赖）"
+  log "API 运行时依赖重新安装后校验通过（含 zonoe 用户可读性检查）"
 }
 
 build_application(){
+  local old_umask
   install_node_dependencies
+  old_umask="$(umask)"
+  umask 0022
   log "执行 API 语法检查与 React Production Build"; (cd "$ROOT"&&npm run build)
   [[ -f "$ROOT/apps/web/dist/index.html" ]]||die "前端构建产物缺少 index.html"
   mkdir -p "$ROOT/public"
   rsync -a --delete --exclude='.user.ini' --exclude='.well-known/' --exclude='files' "$ROOT/apps/web/dist/" "$ROOT/public/"
+  chmod -R a+rX "$ROOT/apps/web/dist" "$ROOT/public" 2>/dev/null || true
+  umask "$old_umask"
 }
 
 ensure_runtime_user(){
