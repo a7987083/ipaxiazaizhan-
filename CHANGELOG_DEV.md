@@ -1,5 +1,24 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091222 Admin usability + controlled IPA write-back
+
+- 后台“站点设置”改为中文多字段表单：站点名称、站点公告、首页主标题一次加载、一次保存，不再要求管理员理解 `site_name/site_notice/hero_title`。
+- 新增“本地缓存”管理页：查看 IPA/目录/任务缓存大小与状态；支持清空目录缓存、重置失败解析、清空 IPA 解析缓存和全部本地缓存。任何缓存操作都不会删除 OpenList IPA 或 MySQL 业务数据。
+- 新增“数据同步”页，为每个 MySQL 软件源单独配置 IPA → 数据库字段映射。
+- 每个 IPA 字段独立控制：是否参与同步、目标真实 MySQL 列、写回策略（只预览 / 值变化时 / 仅空值 / 以 IPA 为准）。
+- 软件源级写回和自动写回默认全部关闭；不允许两个启用字段映射到同一数据库列；保存时校验目标列真实存在。
+- 写回只 UPDATE 已存在 App；2026091222 不自动 INSERT 新 App。
+- 写回资格采用严格保护：必须当前 IPA `md5 === parsedMd5`、解析成功、无 parseError；旧缓存和失败解析不能修改数据库。
+- 新增写回预览、手动确认同步、写回历史；历史不保存 MySQL 密码或 OpenList Token。
+- 新增后台自动写回调度器。只有管理员显式开启“允许写回 + 自动写回”的软件源才参与，且仍逐字段遵守映射策略；相同值不会制造无意义 UPDATE。
+- 新增 contract tests 覆盖默认关闭、重复目标列、字段禁用、empty/preview 策略和 unchanged no-op。
+
+### 验证状态
+
+- 新增后端 service/router/test 与修改后的 `app.js` 本地 `node --check` 通过。
+- 前端 Production build、Vitest、Native smoke、BaoTa contract、MySQL multi-source contract、GitHub updater contract：等待当前 HEAD GitHub Actions 验证。
+- 真实 BaoTa / 真实 MySQL 写回尚未执行。首次实机验证必须先保持软件源写回关闭，只运行 Preview。
+
 ## 2026-09-14 — 2026091221 Public IPA metadata discovery
 
 - 继续以 2026091220 / `7f48a23c50072fd8a15c50aef74631ca8007504f` 为功能基线，不修改已验证的 updater 和 IPA Range 解析机制。
@@ -13,12 +32,8 @@
 
 ### 验证状态
 
-- 本地 `node --check`：修改后的 `appRepository.js` 和新增 contract test 均通过。
-- GitHub Actions #55，代码提交 `7f121393e3a3f04dbd9732b5d22eadcf701a64ca`：`validate` 成功。
-- Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract 均成功。
-- `package-and-release` 成功：当前前端/API 打包、release metadata、部署包构建/校验和 CI Artifact 上传均成功；GitHub Release 发布步骤按条件 skipped。
-- `release-e2e` 按现有 workflow 条件 skipped。
-- 真实 BaoTa 2026091221 E2E 尚未执行，因此当前状态是 **CI verified / runtime pending**。
+- GitHub Actions #55/#56 通过；Integration tests、Production build、Native API/Frontend smoke、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、部署包构建/校验均成功。
+- 真实 BaoTa 2026091221 E2E 尚未执行，因此状态为 **CI verified / runtime pending**。
 
 ## 2026-09-14 — 2026091220 IPA parse results explorer
 
@@ -26,36 +41,17 @@
 - OpenList IPA 缓存升级为 v3，增加安全 `appRefs` 索引，仅保存软件源/原 ID/App 名称与版本/DB 大小/API 内部路径，不保存 `bt1a`、Token 或 `raw_url`。
 - 后台新增完整解析结果分页、搜索和状态筛选：全部、已解析、待解析、失败、版本/大小异常。
 - 解析结果同时展示软件源版本/大小与 IPA 包内版本/Build/Bundle ID/最低 iOS/实际大小。
-- 版本不一致采用非空精确比较；大小差异超过 max(1 MiB, IPA 实际大小 1%) 才提示异常，降低格式/舍入造成的误报。
-- 旧 v2 缓存兼容读取；首次 1220 MD5 扫描后自动补齐安全 App 引用索引。
 - 新增 contract tests 覆盖 appRefs 不泄漏下载地址、缓存 schema 持久化及版本/大小异常判断。
-
-### 验证状态
-
-- 本地 Node 语法检查通过（API service/routes/tests）。
-- GitHub Actions #52 已通过；真实服务器结果仍以部署验证为准。
 
 ## 2026-09-13 — 2026091217 Online update canary
 
 - 仅用于验证 2026091216 → 2026091217 的真实在线更新链路。
 - 不改业务功能；通过版本号变化触发完整的 Preview 下载、备份、安装、配置恢复、API 重启、健康检查与动态进度流程。
-- 成功标准：更新后 VERSION=2026091217，后台/MySQL 软件源/OpenList/站点设置等持久配置保持不变，更新状态最终为 success。
-- 若更新失败，应由 1216 更新器回滚，并在后台状态与 data/update-runtime/admin-update.log 中留下可诊断信息。
 
 ## 2026-09-13 — 2026091208 Multi-MySQL software sources + admin operations
 
-- 后台保留并完善 GitHub「在线更新」：检查版本、一键更新、状态轮询，root systemd worker 继续与 Web API 隔离。
 - 应用数据改为直接聚合一个或多个现有 MySQL 软件源，不再在 ZONOE 内复制一套 App/版本/IPA 数据。
-- 原 FastAdmin `fa_category` 结构原生适配：`name`、`nickname`、`image`、`keywords/description`、`weigh`、`bt1a`、`bt2a`、`cs`。
 - 多库允许相同原始 ID，ZONOE 使用 `source_slug:legacy_id` 作为全局身份。
-- 后台新增 MySQL 软件源：新增、编辑、启停、优先级、测试连接；凭据使用既有 `SOURCE_CONFIG_KEY` 加密落盘。
-- IPA 下载继续 302 到原 `bt1a` 地址；不上传第二份文件。旧 `/admin/upload` 明确禁用。
-- ZONOE 运行时去除 PostgreSQL 依赖；管理员、站点设置、加密源配置放在 `data/control`，更新时一起备份。
-- 后台新增「修改密码」：验证当前密码、bcrypt 保存、session version 增量、修改成功强制重新登录；`.env` 密码仅首次初始化使用。
-- 登录/API/下载限流统一返回项目 JSON 错误，前端不再把 429 显示成“响应解析失败”。
-- CI 增加双 MySQL 软件源模拟测试，覆盖重复 ID、跨源搜索、源筛选、原地址下载、密码修改与 429 JSON。
-
-### 验证状态
-
-- 本地 Shell 语法、Node 语法、Workflow YAML 解析已通过。
-- 真实宝塔多 MySQL 源和后台一键更新 E2E 以对应版本部署记录为准。
+- 后台新增 MySQL 软件源：新增、编辑、启停、优先级、测试连接；凭据加密落盘。
+- IPA 下载继续 302 到原 `bt1a` 地址；不上传第二份文件。
+- ZONOE 运行时去除 PostgreSQL 依赖。

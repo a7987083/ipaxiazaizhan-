@@ -1,6 +1,6 @@
-# REST API v1 — 2026091221
+# REST API v1 — 2026091222
 
-统一格式：成功 `{ "ok": true, "data": ..., "meta": ... }`；失败 `{ "ok": false, "error": { "code": "...", "message": "..." } }`。限流 429 也使用同一 JSON 格式。
+统一格式：成功 `{ "ok": true, "data": ..., "meta": ... }`；失败 `{ "ok": false, "error": { "code": "...", "message": "..." } }`。所有非 GET 后台请求必须携带 `X-CSRF-Token`。
 
 ## Public
 
@@ -9,35 +9,72 @@
 - `GET /api/v1/search?q=...`
 - `GET /api/v1/apps/{source_slug:legacy_id}`
 - `GET /api/v1/apps/{source_slug:legacy_id}/versions`
-- `GET /api/v1/categories` — 返回已启用 MySQL 软件源，兼容前端筛选
-- `GET /api/v1/tags` — 当前返回空数组
+- `GET /api/v1/categories`
 - `GET /api/v1/settings`
 - `GET /download/{source_slug:legacy_id}` -> 302 到原 `fa_category.bt1a`
 
-`q` 除原 MySQL 的名称/源版本/说明外，在 OpenList v3 缓存可用时还会匹配 IPA 包内名称、包内版本、Build、Bundle ID、最低 iOS、IPA 文件名和 Executable。`ipa` 只公开解析状态，不公开解析错误详情、`bt1a`、OpenList Token、`raw_url` 或内部 API 路径。`ios=<target>` 的语义是“最低系统要求 <= target”，只返回当前 MD5 对应且已完成解析、能够确认 `MinimumOSVersion` 的 IPA；未知/待解析/失败项不会被误判为兼容。
-
-App 列表/详情在有当前解析结果时会返回 `ipa_status`、`package_name`、`package_version`、`package_build`、`bundle_id`、`min_ios` 和安全的 `ipa_metadata`。详情还保留 `source_file_size` 用于和 OpenList 实际大小区分。
-
-## Admin
-
-认证：`POST /api/v1/admin/login`，服务端写 HttpOnly JWT cookie 和 CSRF cookie。所有非 GET 后台请求必须携带 `X-CSRF-Token`。
+## Admin — existing
 
 - `POST /api/v1/admin/login`
 - `POST /api/v1/admin/logout`
 - `GET /api/v1/admin/me`
-- `POST /api/v1/admin/account/password`
-- `GET /api/v1/admin/apps` — 多 MySQL 源只读聚合
-- `GET /api/v1/admin/apps/{id}`
-- `GET /api/v1/admin/sources`
-- `POST /api/v1/admin/sources`
-- `PUT /api/v1/admin/sources/{id}`
-- `DELETE /api/v1/admin/sources/{id}`
-- `POST /api/v1/admin/sources/{id}/test`
-- `GET /api/v1/admin/statistics`
-- `GET /api/v1/admin/settings`
-- `PUT /api/v1/admin/settings/{key}`
+- `GET /api/v1/admin/apps`
+- `GET|POST|PUT|DELETE /api/v1/admin/sources...`
+- `GET|PUT /api/v1/admin/openlist...`
 - `GET /api/v1/admin/openlist/results`
-- `GET /api/v1/admin/system/update`
-- `POST /api/v1/admin/system/update`
+- `GET|POST /api/v1/admin/system/update`
 
-App/Version 写接口继续返回 `405 SOURCE_MANAGED`：应用由原 MySQL 软件源维护，ZONOE 不复制 IPA。
+## Admin — 2026091222
+
+### 中文站点设置
+
+- `GET /api/v1/admin/settings`
+- `PUT /api/v1/admin/settings`
+
+批量保存 `site_name`、`site_notice`、`hero_title`。旧的 `PUT /settings/{key}` 保持兼容。
+
+### 本地缓存管理
+
+- `GET /api/v1/admin/cache`
+- `POST /api/v1/admin/cache/clear`
+
+`target` 可为：
+
+- `directory`：清空 OpenList 目录清单缓存。
+- `failed`：清除解析失败/重试等待状态，使失败 IPA 重新进入待解析队列。
+- `ipa`：清空本机 IPA 解析缓存。
+- `all`：清空目录 + IPA 本地缓存。
+
+缓存操作不会删除 OpenList IPA，也不会删除/修改 MySQL 业务数据。OpenList 扫描/解析任务运行中时拒绝清理。
+
+### IPA → MySQL 字段映射 / 写回
+
+- `GET /api/v1/admin/sources/{id}/writeback`
+- `PUT /api/v1/admin/sources/{id}/writeback`
+- `GET /api/v1/admin/sources/{id}/writeback/preview?limit=50`
+- `POST /api/v1/admin/sources/{id}/writeback/apply`
+- `GET /api/v1/admin/sources/{id}/writeback/history?limit=50`
+
+支持的 IPA 字段：
+
+`package_name`、`package_version`、`package_build`、`bundle_id`、`minimum_ios`、`file_size`、`executable`、`md5`。
+
+每个字段独立配置：
+
+- 是否参与同步；
+- 目标 MySQL 真实字段；
+- `preview`：只预览；
+- `changed`：值变化时更新；
+- `empty`：仅数据库为空时填充；
+- `always`：以当前 IPA 值为准（相同值不会制造无意义 UPDATE）。
+
+保护规则：
+
+1. 软件源级写回默认关闭。
+2. 自动写回默认关闭。
+3. 不允许两个已启用 IPA 字段映射到同一个 MySQL 列。
+4. 目标列必须真实存在于当前应用表。
+5. 只 UPDATE 已存在的 App；2026091222 不自动 INSERT 新 App。
+6. 只有 `md5` 与 `parsedMd5` 完全一致、解析成功且无 parseError 的当前 IPA 元数据才有资格写回。
+7. 自动写回仍严格遵守每个字段的启用状态和策略。
+8. 写回历史保存在 ZONOE control 数据目录，不包含 MySQL 密码或 OpenList Token。

@@ -1,25 +1,27 @@
 # Roadmap
 
-## Current — 2026091221 Public IPA metadata discovery
+## Current — 2026091222 Admin usability + controlled IPA write-back
 
-- [x] Multi-MySQL source aggregation / FastAdmin `fa_category` compatibility
-- [x] BaoTa Native + systemd runtime, no PostgreSQL runtime dependency
-- [x] GitHub admin online updater; 2026091219 real forward-update baseline verified
-- [x] OpenList MD5 scan + Range-based IPA `Info.plist` parsing
-- [x] v3 safe `appRefs` cache, full admin parse-results explorer and mismatch audit
-- [x] Public app detail enrichment with package version / Build / Bundle ID / minimum iOS / actual IPA size
-- [x] Public search can match current Bundle ID and parsed package metadata
-- [x] Public filters for parsed / pending / failed IPA and target iOS compatibility
-- [x] Public cards expose safe parse state without leaking `bt1a`, Token, `raw_url` or internal OpenList path
-- [x] Stale-MD5 / failed parse metadata is excluded from public package fields and metadata search
-- [x] Contract tests for metadata search/status/iOS version comparison and stale-cache handling
-- [x] 2026091221 code CI green at `7f121393e3a3f04dbd9732b5d22eadcf701a64ca` (Actions #55)
-- [ ] Deploy 2026091221 to real BaoTa through the existing updater
-- [ ] Real-data E2E: Bundle ID search, parsed-status filter, target-iOS filter, app detail fields
-- [ ] After real E2E, choose next metadata phase: device family / architecture / signing-encryption diagnostics
+- [x] Public IPA metadata discovery / Bundle ID search / target-iOS filters (2026091221)
+- [x] 中文公开站点设置表单，一次读取/保存站点名称、公告、首页主标题
+- [x] 本地缓存管理：目录缓存、解析失败重置、IPA 解析缓存、全部缓存
+- [x] 每个 MySQL 软件源独立 IPA → 数据库字段映射
+- [x] 每个 IPA 字段独立“参与同步 / 数据库列 / 写回策略”
+- [x] 软件源级写回总开关，默认关闭
+- [x] 自动写回开关，默认关闭
+- [x] 数据库真实列枚举与映射冲突校验
+- [x] 当前 MD5/parsedMd5 强一致保护
+- [x] 写回预览、手动确认同步、写回历史
+- [x] 后台自动写回调度器（仅已有 App，不 INSERT）
+- [x] Contract tests：默认关闭、重复列、字段禁用、empty/preview/unchanged 策略
+- [ ] Current-head GitHub Actions green for 2026091222
+- [ ] Real BaoTa deploy / updater validation
+- [ ] Real MySQL dry-run preview on production-like source
+- [ ] Explicitly enable one safe field (recommended: version or size) and verify real write-back
+- [ ] After real verification: design auto-INSERT workflow for brand-new IPA/App
 
 ## Stable baselines
 
 - `2026091219`: real BaoTa Native/online-update chain verified.
-- `2026091220` / `7f48a23c50072fd8a15c50aef74631ca8007504f`: IPA parse-results explorer; GitHub Actions passed.
-- `2026091221` code / `7f121393e3a3f04dbd9732b5d22eadcf701a64ca`: public IPA metadata discovery; GitHub Actions #55 passed; real BaoTa E2E pending.
+- `2026091220`: IPA parse-results explorer; CI passed.
+- `2026091221`: public IPA metadata discovery; CI passed.

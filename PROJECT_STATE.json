@@ -1,62 +1,43 @@
 {
   "repository": "a7987083/ipaxiazaizhan-",
   "branch": "feature/baota-native-deploy-v1",
-  "version": "2026091221",
+  "version": "2026091222",
   "baseline": {
-    "version": "2026091220",
-    "commit": "7f48a23c50072fd8a15c50aef74631ca8007504f",
+    "version": "2026091221",
+    "commit": "1ef29b4f974808f5e8327581d3e20f17faae8ee2",
     "ci": "passed"
   },
-  "phase": "Phase 1.7 Public IPA Metadata Discovery",
-  "phase_status": "ci_passed_real_e2e_pending",
+  "phase": "Phase 1.8 Controlled IPA Write-Back",
+  "phase_status": "implementation_complete_ci_pending",
   "production_verified": false,
-  "runtime": {
-    "web": "BaoTa Nginx serves public/",
-    "api": "Node.js 22 systemd zonoe-api on 127.0.0.1:3000",
-    "application_data": "one or more existing MySQL software-source databases, read directly",
-    "application_table": "fa_category compatible",
-    "control_plane": "data/control JSON files; encrypted source credentials; no PostgreSQL runtime dependency",
-    "ipa_storage": "original source URLs; OpenList metadata cache only; no duplicate IPA upload"
-  },
   "features": {
-    "multi_mysql_sources": true,
-    "composite_app_identity": "source_slug:legacy_id",
-    "github_admin_update": true,
-    "openlist_ipa_metadata": true,
-    "openlist_cache_schema": 3,
-    "admin_parse_results_explorer": true,
-    "public_package_metadata": true,
-    "public_bundle_id_search": true,
-    "public_ipa_status_filter": true,
-    "public_target_ios_filter": true,
-    "stale_public_metadata_blocked": true,
-    "duplicate_ipa_upload_disabled": true,
-    "postgres_runtime_required": false
+    "chinese_site_settings_form": true,
+    "local_cache_management": true,
+    "mysql_writeback_default_enabled": false,
+    "field_level_mapping": true,
+    "field_level_strategy": true,
+    "writeback_preview": true,
+    "manual_existing_app_writeback": true,
+    "automatic_existing_app_writeback": true,
+    "automatic_new_app_insert": false,
+    "writeback_history": true,
+    "strict_current_md5_required": true
+  },
+  "writeback_safety": {
+    "source_level_opt_in": true,
+    "field_level_opt_in": true,
+    "real_column_validation": true,
+    "duplicate_target_column_blocked": true,
+    "stale_metadata_blocked": true,
+    "failed_parse_blocked": true,
+    "insert_new_apps": false
   },
   "verification": {
-    "baseline_2026091220_ci": "passed",
-    "local_changed_api_node_syntax": "passed",
-    "local_new_contract_test_node_syntax": "passed",
-    "code_commit": "7f121393e3a3f04dbd9732b5d22eadcf701a64ca",
-    "github_actions_run": 34776313872,
-    "github_actions_run_number": 55,
-    "validate": "passed",
-    "integration_tests": "passed",
-    "production_build": "passed",
-    "native_api_smoke": "passed",
-    "native_frontend_smoke": "passed",
-    "baota_native_contract": "passed",
-    "mysql_multi_source_contract": "passed",
-    "github_updater_contract": "passed",
-    "deployment_package_build_and_validation": "passed",
-    "real_baota_2026091221_e2e": "pending"
+    "baseline_2026091221_ci": "passed",
+    "local_new_backend_syntax": "passed",
+    "current_head_ci": "pending",
+    "real_baota_e2e": "pending",
+    "real_mysql_writeback": "pending"
   },
-  "next_task": "Deploy 2026091221 through the verified BaoTa online updater and validate Bundle ID search, IPA status filters, target-iOS compatibility, pagination totals and detail metadata against real parsed cache data.",
-  "notes": [
-    "2026091219 remains the last explicitly documented real BaoTa Native/online-update baseline.",
-    "2026091221 does not change updater internals or IPA parsing transport; it consumes the existing v3 safe cache.",
-    "Target-iOS compatibility is conservative: unknown, stale, pending or failed parse results are excluded because compatibility cannot be proven.",
-    "Stale-MD5 and failed parsed metadata is not exposed as current public Bundle ID/version/minimum-iOS data and cannot satisfy metadata search.",
-    "Public APIs do not expose bt1a, OpenList tokens, raw_url, internal OpenList paths or parse-error text."
-  ]
+  "next_task": "Wait for CI, deploy 2026091222 to BaoTa, preview write-back against a real source with source-level write-back still disabled, then enable one low-risk field and validate one existing App."
 }
