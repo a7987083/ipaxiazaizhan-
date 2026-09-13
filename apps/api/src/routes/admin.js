@@ -7,7 +7,8 @@ import { login,changePassword } from '../services/authService.js';
 import { getOnlineUpdateStatus,queueOnlineUpdate } from '../services/updateService.js';
 import { getOpenListIpaStatus,queueOpenListIpaMetadata,testOpenListConnection,listMissingOpenListEntries,listOpenListParseResults,resetOpenListScheduler } from '../services/openListMetadataService.js';
 import { testMysqlSource } from '../services/mysqlCli.js';
-import { getMysqlSource,saveOpenListConfig,saveOpenListSchedule } from '../storage/controlStore.js';
+import { applyIpaWriteback,listSourceColumns,listWritebackHistory,previewIpaWriteback,saveSourceIpaSync } from '../services/ipaWritebackService.js';
+import { clearLocalCache,getLocalCacheStatus,getMysqlSource,saveOpenListConfig,saveOpenListSchedule,setSettings } from '../storage/controlStore.js';
 import { loginLimiter } from '../middleware/rateLimit.js';
 import { requireAdmin,requireCsrf } from '../middleware/auth.js';
 import * as apps from '../repositories/appRepository.js';
@@ -16,6 +17,10 @@ import * as admin from '../repositories/adminRepository.js';
 const r=Router();
 const sourceSchema=z.object({
   name:z.string().min(1),slug:z.string().min(1).optional(),host:z.string().min(1),port:z.coerce.number().int().positive().max(65535).default(3306),database:z.string().min(1),username:z.string().min(1),password:z.string().optional(),table:z.string().regex(/^[A-Za-z0-9_]+$/).default('fa_category'),enabled:z.boolean().optional(),priority:z.coerce.number().int().optional(),writeStats:z.boolean().optional()
+});
+const ipaSyncSchema=z.object({
+  mode:z.enum(['disabled','preview','auto_update']).default('disabled'),
+  mappings:z.record(z.string(),z.object({enabled:z.boolean().optional().default(false),column:z.string().max(128).optional().default(''),strategy:z.enum(['always','if_empty','if_changed','preview']).optional().default('if_changed')})).optional().default({})
 });
 const openListSchema=z.object({
   enabled:z.boolean().optional(),url:z.string().url().optional(),token:z.string().optional(),publicPathPrefix:z.string().min(1).optional(),apiBasePath:z.string().min(1).optional()
@@ -39,10 +44,10 @@ r.post('/account/password',asyncHandler(async(req,res)=>{
   ok(res,{changed:true,reloginRequired:true});
 }));
 
-// 应用来自外部 MySQL 软件源：这里仅提供只读聚合，不复制或上传 IPA。
+// 应用来自外部 MySQL 软件源。常规管理仍只读；只有显式配置的 IPA 字段映射允许写回已有记录。
 r.get('/apps',asyncHandler(async(req,res)=>{ const x=await apps.listApps({...req.query,pageSize:req.query.pageSize||100}); ok(res,x.items,{page:x.page,pageSize:x.pageSize,total:x.total,sourceErrors:x.sourceErrors||[]}); }));
 r.get('/apps/:id',asyncHandler(async(req,res)=>{ const x=await apps.getApp(req.params.id,false); if(!x) throw new AppError(404,'APP_NOT_FOUND','应用不存在'); x.versions=await apps.listVersions(x.id,true); ok(res,x); }));
-const sourceManaged=(_req,_res,next)=>next(new AppError(405,'SOURCE_MANAGED','应用由原 MySQL 软件源管理，新站不会复制或重新上传 IPA'));
+const sourceManaged=(_req,_res,next)=>next(new AppError(405,'SOURCE_MANAGED','应用由原 MySQL 软件源管理；仅 IPA 字段映射功能可以按授权字段更新已有记录'));
 r.post('/apps',sourceManaged); r.put('/apps/:id',sourceManaged); r.delete('/apps/:id',sourceManaged);
 r.post('/apps/:id/versions',sourceManaged); r.put('/versions/:id',sourceManaged); r.delete('/versions/:id',sourceManaged); r.put('/versions/:id/sources',sourceManaged);
 
@@ -62,6 +67,29 @@ r.delete('/sources/:id',asyncHandler(async(req,res)=>ok(res,{deleted:await admin
 r.post('/sources/:id/test',asyncHandler(async(req,res)=>{
   const src=await getMysqlSource(Number(req.params.id),{withSecrets:true}); if(!src)throw new AppError(404,'SOURCE_NOT_FOUND','软件源不存在');
   try{ const connected=await testMysqlSource(src.config); ok(res,{connected}); }catch(e){ throw new AppError(400,'SOURCE_CONNECT_FAILED',`MySQL 连接失败：${e.message}`); }
+}));
+r.get('/sources/:id/columns',asyncHandler(async(req,res)=>{
+  try{ ok(res,await listSourceColumns(Number(req.params.id))); }
+  catch(e){ throw new AppError(e?.status||400,e?.code||'SOURCE_COLUMNS_FAILED',e.message); }
+}));
+r.put('/sources/:id/ipa-sync',asyncHandler(async(req,res)=>{
+  const p=ipaSyncSchema.parse(req.body||{});
+  try{ ok(res,await saveSourceIpaSync(Number(req.params.id),p)); }
+  catch(e){ throw new AppError(e?.status||400,e?.code||'IPA_SYNC_CONFIG_FAILED',e.message); }
+}));
+r.post('/sources/:id/ipa-sync/preview',asyncHandler(async(req,res)=>{
+  const p=z.object({limit:z.coerce.number().int().min(1).max(500).default(100),appKeys:z.array(z.string()).max(500).optional().default([])}).parse(req.body||{});
+  try{ ok(res,await previewIpaWriteback({sourceId:Number(req.params.id),...p})); }
+  catch(e){ throw new AppError(e?.status||400,e?.code||'IPA_SYNC_PREVIEW_FAILED',e.message); }
+}));
+r.post('/sources/:id/ipa-sync/apply',asyncHandler(async(req,res)=>{
+  const p=z.object({limit:z.coerce.number().int().min(1).max(500).default(50),appKeys:z.array(z.string()).max(500).optional().default([])}).parse(req.body||{});
+  try{ ok(res,await applyIpaWriteback({sourceId:Number(req.params.id),...p,trigger:`manual:${req.admin?.username||'admin'}`})); }
+  catch(e){ throw new AppError(e?.status||400,e?.code||'IPA_SYNC_APPLY_FAILED',e.message); }
+}));
+r.get('/writeback/history',asyncHandler(async(req,res)=>{
+  const p=z.object({limit:z.coerce.number().int().min(1).max(500).default(100)}).parse(req.query||{});
+  ok(res,await listWritebackHistory(p.limit));
 }));
 
 r.get('/openlist',asyncHandler(async(_req,res)=>ok(res,await getOpenListIpaStatus())));
@@ -104,8 +132,19 @@ r.post('/openlist/sync',asyncHandler(async(req,res)=>{
   }
 }));
 
+r.get('/cache',asyncHandler(async(_req,res)=>ok(res,await getLocalCacheStatus())));
+r.post('/cache/clear',asyncHandler(async(req,res)=>{
+  const p=z.object({scope:z.enum(['directory','ipa','failed','task','all'])}).parse(req.body||{});
+  try{ ok(res,await clearLocalCache(p.scope)); }
+  catch(e){ throw new AppError(400,e?.code||'CACHE_CLEAR_FAILED',e.message); }
+}));
+
 r.get('/statistics',asyncHandler(async(_req,res)=>ok(res,await admin.statistics())));
 r.get('/settings',asyncHandler(async(_req,res)=>ok(res,await admin.getSettings(false))));
+r.put('/settings',asyncHandler(async(req,res)=>{
+  const p=z.object({values:z.record(z.string(),z.any())}).parse(req.body||{});
+  ok(res,await setSettings(p.values));
+}));
 r.put('/settings/:key',asyncHandler(async(req,res)=>{ const p=z.object({value:z.any(),isPublic:z.boolean().optional()}).parse(req.body); await admin.setSetting(req.params.key,p.value,p.isPublic||false); ok(res,{updated:true}); }));
 
 r.get('/system/update',asyncHandler(async(_req,res)=>ok(res,await getOnlineUpdateStatus())));
@@ -121,5 +160,5 @@ r.post('/system/update',asyncHandler(async(req,res)=>{
   }
 }));
 
-r.post('/upload',(_req,_res,next)=>next(new AppError(405,'UPLOAD_DISABLED','此站点直接使用现有 MySQL 软件源，仅供查看，不再重复上传 IPA')));
+r.post('/upload',(_req,_res,next)=>next(new AppError(405,'UPLOAD_DISABLED','此站点继续复用现有 IPA；自动写回仅更新已存在的软件源记录，不会自动创建 App')));
 export default r;
