@@ -12,6 +12,7 @@ const OPENLIST_FILE = path.join(CONTROL_DIR, 'openlist.json');
 const IPA_CACHE_FILE = path.join(CONTROL_DIR, 'openlist-ipa-cache.json');
 const OPENLIST_DIR_CACHE_FILE = path.join(CONTROL_DIR, 'openlist-directory-cache.json');
 const OPENLIST_TASK_FILE = path.join(CONTROL_DIR, 'openlist-task.json');
+const OPENLIST_REPLICA_FILE = path.join(CONTROL_DIR, 'openlist-replicas.json');
 const DOWNLOAD_DIR = path.join(CONTROL_DIR, 'downloads');
 
 let writeQueue = Promise.resolve();
@@ -43,6 +44,36 @@ function normalizeSchedule(input={}) {
     enabled: input?.enabled === true,
     intervalMinutes: Math.min(1440,Math.max(5,Number(input?.intervalMinutes)||10)),
     parseLimit: Math.min(20,Math.max(1,Number(input?.parseLimit)||3))
+  };
+}
+
+function cleanOpenListPath(v='/') {
+  let s=String(v||'/').trim().replace(/\\/g,'/');
+  if(!s.startsWith('/')) s=`/${s}`;
+  s=path.posix.normalize(s);
+  if(!s.startsWith('/')) s=`/${s}`;
+  while(s.length>1&&s.endsWith('/'))s=s.slice(0,-1);
+  return s||'/';
+}
+
+function normalizeReplicaConfig(input={}) {
+  const mounts=Array.isArray(input?.mounts)?input.mounts:[];
+  return {
+    version:1,
+    enabled:input?.enabled===true,
+    allowCopy:input?.allowCopy===true,
+    allowRename:input?.allowRename===true,
+    allowQuarantine:input?.allowQuarantine===true,
+    quarantineFolder:String(input?.quarantineFolder||'.zonoe-quarantine').trim().replace(/[\\/]+/g,'-').slice(0,120)||'.zonoe-quarantine',
+    aliasMountPath:input?.aliasMountPath?cleanOpenListPath(input.aliasMountPath):'',
+    mounts:mounts.map(x=>({
+      storageId:Number(x?.storageId)||0,
+      mountPath:cleanOpenListPath(x?.mountPath||'/'),
+      rootPath:cleanOpenListPath(x?.rootPath||x?.mountPath||'/'),
+      enabled:x?.enabled!==false,
+      writable:x?.writable===true,
+      label:String(x?.label||'').trim().slice(0,120)
+    })).filter(x=>x.storageId>0)
   };
 }
 
@@ -226,7 +257,7 @@ export async function saveOpenListConfig(data) {
   let oldCfg={};
   try { if(old?.configEncrypted) oldCfg=decryptJson(old.configEncrypted); } catch {}
   const token=String(data.token||oldCfg.token||'').trim();
-  if(!token) throw Object.assign(new Error('首次配置 OpenList 必须填写只读 Token'),{code:'OPENLIST_TOKEN_REQUIRED'});
+  if(!token) throw Object.assign(new Error('首次配置 OpenList 必须填写 Token'),{code:'OPENLIST_TOKEN_REQUIRED'});
   const now=new Date().toISOString();
   const cfg={
     url:String(data.url??oldCfg.url??'').trim().replace(/\/+$/,''),
@@ -253,6 +284,18 @@ export async function saveOpenListSchedule(data) {
   row.updatedAt=new Date().toISOString();
   await writeJson(OPENLIST_FILE,row);
   return publicOpenList(row);
+}
+
+export async function readOpenListReplicaConfig() {
+  await ensureControlInitialized();
+  return normalizeReplicaConfig(await readJson(OPENLIST_REPLICA_FILE,{}));
+}
+
+export async function writeOpenListReplicaConfig(value) {
+  await ensureControlInitialized();
+  const normalized=normalizeReplicaConfig(value);
+  await writeJson(OPENLIST_REPLICA_FILE,normalized);
+  return normalized;
 }
 
 export async function readOpenListIpaCache() {
@@ -301,4 +344,4 @@ export async function countTodayDownloads() {
   catch(e){ if(e?.code==='ENOENT') return 0; throw e; }
 }
 
-export { CONTROL_DIR, DOWNLOAD_DIR, IPA_CACHE_FILE, OPENLIST_DIR_CACHE_FILE, OPENLIST_TASK_FILE, normalizeSchedule };
+export { CONTROL_DIR, DOWNLOAD_DIR, IPA_CACHE_FILE, OPENLIST_DIR_CACHE_FILE, OPENLIST_TASK_FILE, OPENLIST_REPLICA_FILE, normalizeSchedule, normalizeReplicaConfig };
