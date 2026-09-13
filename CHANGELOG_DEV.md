@@ -1,5 +1,14 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091223 Write-back preview visibility hotfix
+
+- 修复“预览前 50 个已解析 App”在所有映射字段都无差异时只显示表头、不显示 App 行的问题。
+- 根因：前端在渲染前使用 `previewCount > 0` 过滤，导致后端已返回的“无差异 App”被全部隐藏。
+- 现在预览会显示全部已扫描 App；无差异行明确显示“当前映射字段与 IPA 解析结果一致，无需写入”。
+- 新增预览筛选：全部已扫描 App / 仅有字段差异 / 仅可写变化，并显示当前行数与总扫描数。
+- 新增前端 contract test，防止未来再次把无差异 App 从预览表中静默过滤。
+- 本热修复不修改 MySQL 写回规则、字段映射语义、自动写回调度器或 IPA 解析逻辑。
+
 ## 2026-09-14 — 2026091222 Admin usability + controlled IPA write-back
 
 - 后台“站点设置”改为中文多字段表单：站点名称、站点公告、首页主标题一次加载、一次保存，不再要求管理员理解 `site_name/site_notice/hero_title`。
