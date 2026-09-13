@@ -115,6 +115,10 @@ export async function writeIpaMetadataLibrary(value){
   return normalized;
 }
 
+export async function clearIpaMetadataLibrary(){
+  return writeIpaMetadataLibrary({version:1,entries:{},updatedAt:null});
+}
+
 export async function loadAndSeedIpaMetadataLibrary(cache){
   const current=await readIpaMetadataLibrary();
   const seeded=seedMetadataLibraryFromCache(current,cache);
