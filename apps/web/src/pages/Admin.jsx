@@ -1,8 +1,9 @@
 import {useEffect,useState} from 'react';
 import {api} from '../lib/api';
 import {
-  DashboardPanel,AppsPanel,SourceManager,OpenListManager,PasswordManager
+  DashboardPanel,AppsPanel,SourceManager,PasswordManager
 } from './AdminCorePanels';
+import AdminOpenListPanel from './AdminOpenListPanel';
 import AdminUpdaterPanel from './AdminUpdaterPanel';
 import AdminSettingsPanel from './AdminSettingsPanel';
 import AdminCachePanel from './AdminCachePanel';
@@ -15,11 +16,11 @@ export default function Admin(){
   useEffect(refresh,[]);
   const title={dashboard:'工作台',apps:'应用聚合',sources:'MySQL 软件源',openlist:'IPA 元数据',writeback:'数据同步',settings:'站点设置',cache:'本地缓存',security:'修改密码',update:'在线更新'}[tab]||'后台';
   const tabs=[['dashboard','工作台'],['apps','应用'],['sources','软件源'],['openlist','IPA 元数据'],['writeback','数据同步'],['settings','站点设置'],['cache','本地缓存'],['security','密码'],['update','在线更新']];
-  return <div className="admin-shell"><aside><div className="admin-brand">ZONOE<br/><small>后台管理</small></div>{tabs.map(([k,n])=><button className={tab===k?'active':''} key={k} onClick={()=>setTab(k)}>{n}</button>)}<a href="/">返回前台</a></aside><section className="admin-main"><header><h1>{title}</h1><span>软件源默认只读；数据库写回必须逐源、逐字段显式授权</span></header>{msg&&<div className="toast">{msg}<button onClick={()=>setMsg('')}>×</button></div>}
+  return <div className="admin-shell"><aside><div className="admin-brand">ZONOE<br/><small>后台管理</small></div>{tabs.map(([k,n])=><button className={tab===k?'active':''} key={k} onClick={()=>setTab(k)}>{n}</button>)}<a href="/">返回前台</a></aside><section className="admin-main"><header><h1>{title}</h1><span>软件源默认只读；只有明确开启并保存的数据同步规则才会修改数据库</span></header>{msg&&<div className="toast">{msg}<button onClick={()=>setMsg('')}>×</button></div>}
   {tab==='dashboard'&&<DashboardPanel stats={stats}/>} 
   {tab==='apps'&&<AppsPanel items={apps}/>} 
   {tab==='sources'&&<SourceManager items={sources} refresh={refresh}/>} 
-  {tab==='openlist'&&<OpenListManager/>}
+  {tab==='openlist'&&<AdminOpenListPanel/>}
   {tab==='writeback'&&<AdminWriteBackPanel sources={sources}/>} 
   {tab==='settings'&&<AdminSettingsPanel/>}
   {tab==='cache'&&<AdminCachePanel/>}
