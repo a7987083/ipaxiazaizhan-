@@ -1,8 +1,9 @@
 import {useEffect,useState} from 'react';
 import {api} from '../lib/api';
 import {
-  DashboardPanel,AppsPanel,SourceManager,OpenListManager,PasswordManager,SystemUpdate
+  DashboardPanel,AppsPanel,SourceManager,OpenListManager,PasswordManager
 } from './AdminCorePanels';
+import AdminUpdaterPanel from './AdminUpdaterPanel';
 import AdminSettingsPanel from './AdminSettingsPanel';
 import AdminCachePanel from './AdminCachePanel';
 import AdminWriteBackPanel from './AdminWriteBackPanel';
@@ -23,6 +24,6 @@ export default function Admin(){
   {tab==='settings'&&<AdminSettingsPanel/>}
   {tab==='cache'&&<AdminCachePanel/>}
   {tab==='security'&&<PasswordManager/>}
-  {tab==='update'&&<SystemUpdate/>}
+  {tab==='update'&&<AdminUpdaterPanel/>}
   </section></div>
 }
