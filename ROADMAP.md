@@ -1,37 +1,32 @@
 # Roadmap
 
-## Current — 2026091225 OpenList multi-drive replica management
+## Current — 2026091226 Account-independent IPA metadata persistence
 
 - [x] Public IPA metadata discovery / Bundle ID search / target-iOS filters (2026091221)
 - [x] 中文站点设置、本地缓存、动态数据库同步规则（2026091222–1224）
-- [x] 管理员 IPA 解析库 / 缺失条目显示当前数据库下载地址
-- [x] 从 OpenList 管理接口发现挂载存储
-- [x] 区分实体网盘与 Alias 分流盘，禁止 Alias 被当成实体副本目标
-- [x] 每个实体网盘独立设置副本根目录、是否参与管理、是否允许写操作
-- [x] 以 MySQL `bt1a` 为权威清单，对多个网盘统计已有 / 缺失 / 多余 IPA
-- [x] App × 网盘副本矩阵
-- [x] 通过 OpenList `/api/fs/copy` 补齐缺失副本，不由 ZONOE 中转 IPA
-- [x] 同目录唯一 MD5 匹配时提供安全名称修复建议
-- [x] 通过 OpenList `/api/fs/rename` 执行人工确认的名称修复
-- [x] 多余 IPA 通过 OpenList `/api/fs/move` 移入日期隔离区
-- [x] 1225 不提供永久删除 API
-- [x] Alias 路径覆盖检查；最终下载分流继续交给 OpenList 原生 Alias
-- [x] OpenList Token 文案区分元数据读取权限与副本写权限
-- [x] Contract tests：路径映射、缺失/多余、MD5 改名保护
-- [x] 2026091225 functional code Actions #91 / run `34786345775` 验证通过
-- [ ] Deploy 2026091225 to real BaoTa and verify OpenList storage discovery
-- [ ] Real reconciliation against actual Tianyi/Aliyun/etc. replica roots
-- [ ] Test one cross-storage copy to a non-critical writable target
-- [ ] Test one MD5-backed rename on real OpenList
-- [ ] Test one extra IPA quarantine move and verify recovery path
-- [ ] Verify actual Alias path coverage and OpenList native file-level load balancing
-- [ ] Next: detect same-name but wrong-content replicas using MD5/size and design safe repair
-- [ ] Next: background/scheduled replica reconciliation and bounded auto-fill after real manual verification
-- [ ] Later: quarantine retention/cleanup policy; permanent delete remains deferred until enough audit history exists
+- [x] OpenList multi-drive reconciliation/copy/rename/quarantine + Alias coverage (2026091225)
+- [x] Diagnose account-switch parse loss: old parse identity was bound to `apiPath`
+- [x] Add persistent MD5-addressed parsed metadata library independent of OpenList account/mount/path/download URL
+- [x] Use known file size as a secondary guard before MD5 metadata reuse
+- [x] Migrate valid current v3 path cache into the MD5 library before the OpenList scheduler starts
+- [x] Block stale `parsedMd5`, failed parses and missing files from entering the persistent library
+- [x] Re-associate current files with persisted parse metadata when MD5 matches
+- [x] Invalidate OpenList directory cache at service startup and after OpenList configuration changes
+- [x] Admin cache page shows MD5 library count and storage size
+- [x] Explicit IPA-cache clear also clears persistent MD5 metadata library
+- [x] Contract tests cover same IPA at a new account/path, different-MD5 rejection, size conflict rejection and stale/failed exclusion
+- [x] 2026091226 Actions #103 / run `34787233314` passed functional/version validation and package build
+- [ ] Deploy 2026091226 to real BaoTa
+- [ ] Verify existing parse library migration before changing account again
+- [ ] Real test: same IPA MD5 under a different OpenList account/path restores Bundle ID/version/Build after MD5-only scan
+- [ ] Real test: changed IPA MD5 remains pending and never inherits old metadata
+- [ ] Verify directory listing refresh after account/token change
+- [ ] Continue 1225 real multi-drive copy/rename/quarantine/Alias validation
+- [ ] Follow-up hardening: consult the MD5 library inside the core scan before parse candidate selection so even an immediate `parseLimit>0` account-switch scan cannot perform redundant parsing
 
-## Verification note
+## Recovery note
 
-Actions #89 initially failed only because the new contract file used Node `node:test` while the repository runner is Vitest. The three new algorithm checks themselves passed in TAP output. After converting the test to Vitest, Actions #91 / run `34786345775` passed Integration tests, Production build, Native API smoke, Native frontend static smoke, Shell validation, BaoTa native contract, MySQL multi-source contract, GitHub updater contract and package validation/upload. `release-e2e` remains skipped by workflow condition.
+A pre-1226 parse result that was already overwritten after an account/path switch cannot be reconstructed from ZONOE if no external copy of the old `openlist-ipa-cache.json` exists. It must be parsed once again. 1226 prevents future account/path changes from losing a successfully persisted MD5 result.
 
 ## Stable baselines
 
@@ -41,4 +36,5 @@ Actions #89 initially failed only because the new contract file used Node `node:
 - `2026091222`: controlled IPA write-back + admin tools; CI passed.
 - `2026091223`: Preview visibility hotfix; CI passed.
 - `2026091224`: admin download URLs + dynamic DB sync rules; CI passed; real runtime/write-back pending.
-- `2026091225` functional code `5cba24b3b32307ea892596329205f973126498fe`: OpenList multi-drive reconciliation/copy/rename/quarantine + Alias coverage check; CI #91 passed; real multi-drive E2E pending.
+- `2026091225`: OpenList multi-drive replica management; CI passed; real multi-drive E2E pending.
+- `2026091226`: content-addressed IPA parse persistence across account/path changes; CI passed; real account-switch E2E pending.
