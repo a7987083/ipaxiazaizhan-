@@ -9,6 +9,10 @@ function appKey(source,rowId){ return `${source.slug}:${rowId}`; }
 function versionKey(source,rowId){ return `${source.slug}:${rowId}:current`; }
 function numericSize(v){ const n=Number(String(v??'').trim()); return Number.isFinite(n)&&n>=0?Math.round(n):null; }
 function normalStatus(v){ return ['normal','published','1','active'].includes(String(v||'').toLowerCase()); }
+function normalizeIpaFilter(v){ return ['parsed','pending','failed'].includes(String(v||'').toLowerCase())?String(v).toLowerCase():'all'; }
+function normalizeIosTarget(v){ const s=String(v??'').trim(); return /^\d{1,2}(?:\.\d{1,2}){0,2}$/.test(s)?s:''; }
+function versionParts(v){ return String(v||'').split('.').map(x=>Number.parseInt(x,10)).map(x=>Number.isFinite(x)?x:0); }
+export function compareNumericVersions(a,b){ const aa=versionParts(a),bb=versionParts(b),n=Math.max(aa.length,bb.length); for(let i=0;i<n;i++){ const d=(aa[i]||0)-(bb[i]||0); if(d)return d<0?-1:1; } return 0; }
 
 function mapRow(source,cols){
   const [id,nameHex,nicknameHex,imageHex,keywordsHex,descriptionHex,createtime,updatetime,weigh,statusHex,bt2aHex,cs]=cols;
@@ -34,33 +38,107 @@ function mapRow(source,cols){
   };
 }
 
-async function enrichFromIpaCache(items){
-  let cache;
-  try { cache=await readOpenListIpaCache(); } catch { return items; }
-  return items.map(app=>{
-    const p=cache.apps?.[app.id];
-    const f=p?cache.files?.[p]:null;
-    if(!f || f.missing) return app;
-    const meta=f.parsed||{};
-    return {
-      ...app,
-      file_size:Number(f.size||0)||app.file_size,
-      bundle_id:meta.bundle_id||app.bundle_id,
-      min_ios:meta.minimum_ios||app.min_ios,
-      package_name:meta.name||'',
-      package_version:meta.version||'',
-      package_build:meta.build||'',
-      ipa_metadata:{verified:Boolean(f.md5),parsed:Boolean(f.parsed),parsed_at:f.parsedAt||null,modified:f.modified||null}
-    };
+function parseComposite(id){
+  const m=/^([a-z0-9_-]+):(\d+)(?::current)?$/i.exec(String(id||''));
+  return m?{slug:m[1],id:Number(m[2])}:null;
+}
+
+function fileForApp(cache,appId){
+  const apiPath=cache?.appRefs?.[appId]?.apiPath||cache?.apps?.[appId];
+  const file=apiPath?cache?.files?.[apiPath]:null;
+  return file&&!file.missing?file:null;
+}
+
+export function publicIpaMetadata(cache,appId){
+  const file=fileForApp(cache,appId);
+  if(!file) return {status:'unknown',verified:false,parsed:false};
+  const currentParsed=Boolean(file.parsed&&(!file.md5||!file.parsedMd5||file.parsedMd5===file.md5));
+  const status=file.parseError?'failed':currentParsed?'parsed':'pending';
+  const meta=file.parsed||{};
+  return {
+    status,verified:Boolean(file.md5),parsed:currentParsed,parsedAt:file.parsedAt||null,modified:file.modified||null,
+    fileSize:Number(file.size||0)||0,fileName:String(file.name||''),packageName:String(meta.name||''),
+    packageVersion:String(meta.version||''),packageBuild:String(meta.build||''),bundleId:String(meta.bundle_id||''),
+    minimumIos:String(meta.minimum_ios||''),executable:String(meta.executable||''),parseError:String(file.parseError||'')
+  };
+}
+
+function enrichApp(app,cache){
+  const ipa=publicIpaMetadata(cache,app.id);
+  if(ipa.status==='unknown') return {...app,ipa_status:'unknown'};
+  return {
+    ...app,
+    source_file_size:app.file_size,
+    file_size:ipa.fileSize||app.file_size,
+    bundle_id:ipa.bundleId||app.bundle_id,
+    min_ios:ipa.minimumIos||app.min_ios,
+    package_name:ipa.packageName,
+    package_version:ipa.packageVersion,
+    package_build:ipa.packageBuild,
+    ipa_status:ipa.status,
+    ipa_metadata:{verified:ipa.verified,parsed:ipa.parsed,parsed_at:ipa.parsedAt,modified:ipa.modified}
+  };
+}
+
+async function readIpaCacheSafe(){ try{return await readOpenListIpaCache();}catch{return {apps:{},appRefs:{},files:{}};} }
+async function enrichFromIpaCache(items,cache=null){ const c=cache||await readIpaCacheSafe(); return items.map(app=>enrichApp(app,c)); }
+
+function publicCacheIndex(cache){
+  const keys=new Set([...Object.keys(cache?.apps||{}),...Object.keys(cache?.appRefs||{})]);
+  const out=[];
+  for(const appId of keys){
+    const parsed=parseComposite(appId); if(!parsed)continue;
+    const ref=cache?.appRefs?.[appId]||{};
+    const ipa=publicIpaMetadata(cache,appId);
+    out.push({appId,sourceSlug:String(ref.sourceSlug||parsed.slug),legacyId:Number(ref.legacyId||parsed.id),ref,ipa});
+  }
+  return out;
+}
+
+function metadataSearchText(entry){
+  const {appId,ref={},ipa={}}=entry;
+  return [appId,ref.sourceSlug,ref.sourceName,ref.legacyId,ref.name,ref.version,ipa.fileName,ipa.packageName,ipa.packageVersion,ipa.packageBuild,ipa.bundleId,ipa.minimumIos,ipa.executable]
+    .map(v=>String(v??'').toLowerCase()).join('\n');
+}
+
+export function filterPublicIpaIndex(index,{q='',ipa='all',ios=''}={}){
+  const needle=String(q||'').trim().toLowerCase();
+  const ipaFilter=normalizeIpaFilter(ipa);
+  const iosTarget=normalizeIosTarget(ios);
+  return index.filter(entry=>{
+    if(ipaFilter!=='all'&&entry.ipa.status!==ipaFilter)return false;
+    if(iosTarget){
+      if(entry.ipa.status!=='parsed'||!normalizeIosTarget(entry.ipa.minimumIos))return false;
+      if(compareNumericVersions(entry.ipa.minimumIos,iosTarget)>0)return false;
+    }
+    return !needle||metadataSearchText(entry).includes(needle);
   });
+}
+
+function idsBySource(entries){
+  const m=new Map();
+  for(const x of entries){ if(!m.has(x.sourceSlug))m.set(x.sourceSlug,new Set()); m.get(x.sourceSlug).add(Number(x.legacyId)); }
+  return m;
 }
 
 function selectColumns(table){
   return `SELECT id,HEX(name),HEX(nickname),HEX(image),HEX(keywords),HEX(description),createtime,updatetime,weigh,HEX(status),HEX(bt2a),cs FROM ${table}`;
 }
-function visibleWhere(q=''){
+function idSql(ids){ const list=[...new Set((ids||[]).map(Number).filter(Number.isSafeInteger).filter(x=>x>0))]; return list.length?list.map(x=>sqlInt(x)).join(','):''; }
+function textMatchSql(q=''){
+  if(!q)return '';
+  const like=sqlText(`%${q}%`);
+  return `(name LIKE ${like} OR nickname LIKE ${like} OR keywords LIKE ${like} OR description LIKE ${like})`;
+}
+function visibleWhere(q='',{onlyIds=null,extraSearchIds=[]}={}){
   const parts=["status IN ('normal','published','1','active')"];
-  if(q){ const like=sqlText(`%${q}%`); parts.push(`(name LIKE ${like} OR nickname LIKE ${like} OR keywords LIKE ${like} OR description LIKE ${like})`); }
+  if(Array.isArray(onlyIds)){
+    const ids=idSql(onlyIds); if(!ids)return 'WHERE 1=0'; parts.push(`id IN (${ids})`);
+  }
+  if(q){
+    const text=textMatchSql(q); const extra=idSql(extraSearchIds);
+    parts.push(extra?`(${text} OR id IN (${extra}))`:text);
+  }
   return `WHERE ${parts.join(' AND ')}`;
 }
 function sqlOrder(sort){
@@ -85,35 +163,50 @@ async function enabledSources(filterSlug){
   return filterSlug?all.filter(x=>x.slug===filterSlug):all;
 }
 
-async function querySourceApps(source,{q='',sort='updated',candidateLimit=100}){
+async function querySourceApps(source,{q='',sort='updated',candidateLimit=100,onlyIds=null,extraSearchIds=[]}){
   const table=safeIdentifier(source.config.table||'fa_category');
-  const countSql=`SELECT COUNT(*) FROM ${table} ${visibleWhere(q)}`;
-  const rowsSql=`${selectColumns(table)} ${visibleWhere(q)} ORDER BY ${sqlOrder(sort)} LIMIT ${sqlInt(candidateLimit,100)}`;
+  const where=visibleWhere(q,{onlyIds,extraSearchIds});
+  const countSql=`SELECT COUNT(*) FROM ${table} ${where}`;
+  const rowsSql=`${selectColumns(table)} ${where} ORDER BY ${sqlOrder(sort)} LIMIT ${sqlInt(candidateLimit,100)}`;
   const [countOut,rowsOut]=await Promise.all([runMysql(source.config,countSql),runMysql(source.config,rowsSql)]);
   const count=Number(parseTsv(countOut)?.[0]?.[0]||0);
   const items=parseTsv(rowsOut).map(cols=>mapRow(source,cols)).filter(Boolean);
   return {count,items};
 }
 
-export async function listApps({q='',category,source,sort='updated',page=1,pageSize=20}={}) {
+export async function listApps({q='',category,source,sort='updated',page=1,pageSize=20,ipa='all',ios=''}={}) {
   const p=normalizePagination(page,pageSize);
   const filterSlug=source||category||'';
   const sources=await enabledSources(filterSlug);
   if(!sources.length) return {items:[],total:0,...p,sourceErrors:[]};
+
+  const needle=String(q||'').trim();
+  const ipaFilter=normalizeIpaFilter(ipa);
+  const iosTarget=normalizeIosTarget(ios);
+  const cache=await readIpaCacheSafe();
+  const cacheIndex=publicCacheIndex(cache);
+  const metadataMatches=needle?filterPublicIpaIndex(cacheIndex,{q:needle}):[];
+  const metadataIds=idsBySource(metadataMatches);
+
+  let onlyIds=null;
+  if(ipaFilter!=='all'||iosTarget){
+    const filtered=filterPublicIpaIndex(cacheIndex,{ipa:ipaFilter,ios:iosTarget});
+    onlyIds=idsBySource(filtered);
+  }
+
   const candidateLimit=Math.min(5000,Math.max(p.pageSize,p.page*p.pageSize));
-  const settled=await Promise.allSettled(sources.map(s=>querySourceApps(s,{q:String(q||'').trim(),sort,candidateLimit})));
+  const settled=await Promise.allSettled(sources.map(s=>querySourceApps(s,{
+    q:needle,sort,candidateLimit,
+    onlyIds:onlyIds?[...(onlyIds.get(s.slug)||[])]:null,
+    extraSearchIds:[...(metadataIds.get(s.slug)||[])]
+  })));
   let total=0; const items=[]; const sourceErrors=[];
   settled.forEach((r,i)=>{ if(r.status==='fulfilled'){total+=r.value.count;items.push(...r.value.items)} else sourceErrors.push({source:sources[i].slug,message:r.reason?.message||'查询失败'}) });
   if(settled.every(x=>x.status==='rejected')) throw new AppError(503,'MYSQL_SOURCES_UNAVAILABLE','所有 MySQL 软件源均不可用',sourceErrors);
   items.sort(jsSort(sort));
   const base=items.slice(p.offset,p.offset+p.pageSize).map(({_updatedEpoch,...x})=>x);
-  const sliced=await enrichFromIpaCache(base);
-  return {items:sliced,total,...p,sourceErrors};
-}
-
-function parseComposite(id){
-  const m=/^([a-z0-9_-]+):(\d+)(?::current)?$/i.exec(String(id||''));
-  return m?{slug:m[1],id:Number(m[2])}:null;
+  const sliced=await enrichFromIpaCache(base,cache);
+  return {items:sliced,total,...p,sourceErrors,filters:{ipa:ipaFilter,ios:iosTarget}};
 }
 
 async function rawApp(source,legacyId){
@@ -145,7 +238,7 @@ export async function getApp(idOrSlug,publishedOnly=true) {
 
 export async function listVersions(appId,_includeDraft=false) {
   const app=await getApp(appId,true); if(!app)return [];
-  return [{id:app.version_id,app_id:app.id,version:app.version||'',build:app.package_build||'',file_size:app.file_size,min_ios:app.min_ios,changelog:app.changelog||'',status:'published',release_date:app.release_date||app.updated_at||new Date().toISOString(),download_count:app.download_count,package_version:app.package_version||''}];
+  return [{id:app.version_id,app_id:app.id,version:app.version||'',build:app.package_build||'',file_size:app.file_size,min_ios:app.min_ios,changelog:app.changelog||'',status:'published',release_date:app.release_date||app.updated_at||new Date().toISOString(),download_count:app.download_count,package_version:app.package_version||'',ipa_status:app.ipa_status||'unknown'}];
 }
 
 export async function sourceStatistics(){
