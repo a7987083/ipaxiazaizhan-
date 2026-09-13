@@ -1,14 +1,15 @@
 # Known Issues
 
-## 2026091226 candidate
+## 2026091227 candidate
 
-- Functional/version Actions #103 passed, but the real BaoTa/OpenList account-switch E2E is not yet verified.
-- If a pre-1226 account/path switch already caused a later sync to overwrite the only old path-bound `openlist-ipa-cache.json`, those already-lost parsed records cannot be reconstructed locally. They require one new parse unless an external backup of the old cache exists.
-- Cross-account/path metadata reuse requires a trustworthy 32-hex MD5. A provider/file listing without MD5 cannot safely use the content-addressed library across paths and will remain conservative.
-- MD5 reuse is additionally rejected when both the stored file size and current file size are known and differ.
-- 1226 restores MD5 metadata after the active scan completes. A scan launched immediately after an account/path change with `parseLimit > 0` can still redundantly parse a small selected batch before post-scan reconciliation. For the real account-switch proof, use the MD5-only scan first (`parseLimit=0`). A future hardening step will consult the MD5 library inside core parse-candidate selection.
-- “清空 IPA 解析缓存” and “清空全部缓存” intentionally clear the persistent MD5 metadata library as well as the active path cache. This is destructive only to local metadata; it never deletes OpenList IPA or MySQL business rows.
-- OpenList directory cache is invalidated at service startup and when OpenList config changes. This favors correctness over preserving a 30-minute listing cache across restart/account changes.
-- The MD5 metadata library is stored in the persistent ZONOE control directory as JSON. It is not written into source MySQL and contains no OpenList token, raw URL or download URL.
-- Real 2026091225 multi-drive storage discovery/copy/rename/quarantine/Alias validation is still pending separately.
+- Functional Actions #117 / run `34790323206` passed, but real BaoTa/OpenList Alias load-balancing E2E is not yet verified.
+- ZONOE 1227 discovers/selects an existing OpenList Alias and guides its configuration; it does **not** automatically create or mutate Alias storage. OpenList driver `addition` layouts can vary by version, so automatic mutation remains deferred until the real deployment is inspected.
+- An Alias only participates when downloads use the Alias public path. Existing MySQL `bt1a` URLs such as `/d/a/app/...` that point directly at a physical storage bypass Alias and are not load-balanced. 1227 does not automatically rewrite those database URLs.
+- The persisted reconciliation snapshot can be large for many drives because it includes missing/extra rows and the App × drive matrix. Current scanning remains bounded to 20,000 IPA files and 1,000 directories per selected replica root.
+- Saving replica configuration intentionally clears the persisted reconciliation snapshot. A fresh reconciliation is required because mount/root changes make the previous result stale.
+- Extra/missing lists are paginated in the browser at 100 rows per page, but the complete reconciliation is still produced server-side before display.
+- The OpenList program token/“令牌” can access broad API capabilities. Keep it secret, use HTTPS, and only expose ZONOE admin over trusted authentication. The token is stored encrypted by the existing control-store mechanism and is never returned in cleartext to the frontend.
+- Permanent deletion of extra IPA is still unavailable. Extras can only be moved to the configured quarantine area when explicitly enabled and confirmed.
+- OpenList cross-storage copy may be asynchronous; successful submission does not prove bytes are already present on the target. Reconcile again after OpenList tasks complete.
+- 1226 MD5-addressed metadata persistence remains active, but a pre-1226 parse result that was already overwritten cannot be reconstructed locally without an old cache backup and must be parsed once again.
 - Existing dynamic MySQL write-back still needs real database verification; automatic creation of brand-new App rows remains disabled.
