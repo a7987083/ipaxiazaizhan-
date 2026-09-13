@@ -13,7 +13,7 @@ describe('admin write-back preview UI',()=>{
     expect(s).toContain('全部已扫描 App');
     expect(s).toContain('仅有字段差异');
     expect(s).toContain('仅可写变化');
-    expect(s).toContain('无差异：当前映射字段与 IPA 解析结果一致，无需写入。');
+    expect(s).toContain('无差异：当前启用规则对应的数据与数据库一致，无需写入。');
     expect(s).not.toContain('preview.items?.filter(x=>x.previewCount>0).map');
   });
 });
