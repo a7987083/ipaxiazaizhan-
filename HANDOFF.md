@@ -2,53 +2,40 @@
 
 - Repo: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
-- Candidate: `2026091225`
-- Functional code commit: `5cba24b3b32307ea892596329205f973126498fe`
-- Baseline: `2026091224` / `271c5aca4c83237c28fdfe5fcf4a3c6accf95515`
-- Functional-code GitHub Actions: #91 / run `34786345775` passed for all executed validation/package steps.
-- Real BaoTa/OpenList multi-drive verification for 2026091225: pending.
+- Candidate: `2026091226`
+- Baseline: `2026091225` / `7bef576f3b31b0f15fdba6772ad6d0f0ee76c371`
+- Functional code commit: `1008c0e11e09ead575aad2b777786ced5e3253a6`
+- Version commit: `a7262971801696849f068527f8b0f48c115a2337`
+- Functional/version CI: Actions #103 / run `34787233314` passed all executed validation/package steps.
+- Real BaoTa/OpenList account-switch validation: pending.
 
-## What 1225 adds
+## Root cause fixed in 1226
 
-1. 新增后台“云盘副本”模块，直接读取当前 OpenList 的挂载存储列表。
-2. 管理员从实体挂载中选择参与副本管理的网盘，并为每个盘设置副本根目录和独立“可写”权限。
-3. 以启用 MySQL 软件源当前 `bt1a` 作为权威期望清单，对多个实体网盘递归对账：已有、缺失、多余。
-4. 对账结果提供 App × 网盘副本矩阵；可看到例如天翼 400/400、阿里 80/400 缺 320。
-5. 缺失副本可通过 OpenList `/api/fs/copy` 从已有副本的盘复制到可写目标盘；ZONOE 不下载/上传 IPA 数据。
-6. 如果数据库期望文件缺失，但同目录发现唯一一个 MD5 相同的多余 IPA，则给出“名称修复”建议；人工确认后调用 `/api/fs/rename`。
-7. 数据库不存在的多余 IPA 不提供永久删除；人工确认后只能移动到 `<副本根目录>/.zonoe-quarantine/<日期>/...` 隔离区。
-8. Alias 存储不会被误选为实体副本盘。后台会发现 Alias，并检查其配置中是否覆盖所选副本根目录；Alias 的真正负载均衡策略仍由 OpenList 原生驱动负责。
-9. OpenList Token 文案不再叫“只读 Token”：元数据功能可只给读取权限，但副本管理的存储发现/复制/改名/隔离需要对应权限。
+1225 and earlier stored the effective parse result under `openlist-ipa-cache.json -> files[apiPath]`. A synchronization rebuilt the active file map from the current MySQL/OpenList paths and recovered old parsing only through the same `apiPath`. Switching cloud account, mount, Alias layout or download path could therefore make identical IPA bytes appear new and the old parsed result disappear.
 
-## Safety model
+The directory-list cache also did not distinguish account/token identity when the OpenList URL/path stayed the same, so an account switch could briefly reuse a previous account's directory listing.
 
-- 副本管理默认关闭。
-- 允许复制、允许名称修复、允许隔离三个权限独立，默认关闭。
-- 每个实体盘还要单独标记“可写”。
-- Alias 不能作为 copy/rename/quarantine 实体盘。
-- 改名和隔离执行前重新跑对账确认目标仍然有效。
-- 永久删除 API 在 1225 不存在。
-- 单次同步最多提交 50 个复制任务；后台默认按钮提交 20 个。
-- 单盘扫描最多 20,000 个 IPA / 1,000 个目录，避免配置错误导致无限递归。
+## What 1226 changes
 
-## CI verification
+1. Adds `CONTROL_DIR/openlist-ipa-metadata-library.json`, a persistent parsed-metadata library keyed by normalized MD5, with file size as a defensive secondary guard.
+2. Stores only safe parse fields: package name/version/Build, Bundle ID, MinimumOSVersion and executable. No OpenList token, `raw_url` or download URL is stored in this library.
+3. On service startup, valid current v3 cache entries are migrated into the MD5 library before the OpenList scheduler starts.
+4. Current files whose account/path changed can recover prior parsed metadata from the MD5 library when MD5 matches and known size does not conflict.
+5. Stale `parsedMd5`, parse failures and missing files are not promoted into the MD5 library.
+6. OpenList directory cache is invalidated once on service startup and whenever saved OpenList configuration changes, preventing the previous account's directory listing from being reused.
+7. Admin → 本地缓存 now displays MD5 library entry count/size.
+8. Explicit “清空 IPA 解析缓存” or “清空全部缓存” clears both active path cache and the persistent MD5 library. It never deletes OpenList IPA or MySQL data.
 
-Actions #89 首次失败只因为新 contract 文件误用了 Node `node:test`，三条副本算法子测试本身均通过；修正为 Vitest 后不改业务逻辑。
+## Recovery limitation
 
-Actions #91 / run `34786345775` passed:
-- Integration tests
-- OpenList replica contract tests
-- Production build
-- Native API smoke
-- Native frontend static smoke
-- Shell validation
-- BaoTa native contract
-- MySQL multi-source contract
-- GitHub updater contract
-- deployment package build / validation / artifact upload
+If the user already changed accounts under an older version and a later sync overwrote the only old path-bound `openlist-ipa-cache.json`, those already-lost parse records are not recoverable from ZONOE itself because no historical library existed yet. They need one new parse. After they are parsed once under 1226, future account/path changes can reuse them by MD5.
 
-`release-e2e` 按现有 workflow 条件 skipped。因此 2026091225 是 **CI/package verified，尚未真实 BaoTa/OpenList copy/rename/quarantine/Alias verified**。
+## Verification
 
-## Recommended real deployment validation
+Actions #103 / run `34787233314` passed Integration tests, the new account-switch metadata contracts, Production build, Native API smoke, Native frontend static smoke, Shell validation, BaoTa native contract, MySQL multi-source contract, GitHub updater contract and deployment package validation/upload. `release-e2e` remains skipped by workflow condition.
 
-在线更新到 2026091225 后，先不要开启任何写权限。进入“云盘副本”，确认能读取天翼/阿里等实体挂载和 Alias。只勾选实体盘，填写实际存放 IPA 的根目录，运行“开始多网盘对账”，核对数据库期望总数和每盘已有/缺失/多余数量。确认无误后，只给一个非关键目标盘勾选“可写 + 允许副本复制”，先提交一个小批次。复制完成后重新对账确认。改名必须先看到 MD5 建议；多余文件先隔离，不永久删除。Alias 最终下载分流继续在 OpenList 中使用原生读取负载均衡配置。
+## Recommended real test
+
+Deploy 1226. First confirm Admin → 本地缓存 shows a non-zero `MD5 解析库` count; if old entries were already lost, reparse those once. Run an MD5-only scan (`parseLimit=0`) on account A. Switch to account B / another mount containing identical IPA bytes, save OpenList config and run another MD5-only scan. After the task completes, the same-MD5 App should regain Bundle ID/version/Build without relying on the old path. Finally replace one test IPA with different bytes/MD5 and confirm it becomes pending instead of inheriting old metadata.
+
+The 1225 multi-drive replica features remain present; their real copy/rename/quarantine/Alias E2E is still pending separately.
