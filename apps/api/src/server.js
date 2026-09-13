@@ -2,9 +2,11 @@ import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { ensureControlInitialized } from './storage/controlStore.js';
 import { startOpenListScheduler } from './services/openListMetadataService.js';
+import { startIpaWritebackScheduler } from './services/ipaWritebackScheduler.js';
 
 await ensureControlInitialized();
 await startOpenListScheduler();
+await startIpaWritebackScheduler();
 const app = createApp();
 const server = app.listen(env.PORT, env.HOST, () => {
   console.log(`ZONOE API listening on ${env.HOST}:${env.PORT}`);
