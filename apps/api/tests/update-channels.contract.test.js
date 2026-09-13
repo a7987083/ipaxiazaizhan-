@@ -30,7 +30,10 @@ describe('dual-channel online updater contract',()=>{
   });
 
   test('admin UI checks both channels and sends selected channel',()=>{
-    const s=read('apps/web/src/pages/Admin.jsx');
+    const shell=read('apps/web/src/pages/Admin.jsx');
+    const updater=read('apps/web/src/pages/AdminUpdaterPanel.jsx');
+    const s=shell+updater;
+    expect(shell).toContain('AdminUpdaterPanel');
     expect(s).toContain('检查两个通道');
     expect(s).toContain('预览版 Preview');
     expect(s).toContain('稳定版 Stable Release');
