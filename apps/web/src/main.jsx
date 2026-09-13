@@ -6,7 +6,8 @@ import Home from './pages/Home';
 import Apps from './pages/Apps';
 import AppDetail from './pages/AppDetail';
 import Login from './pages/Login';
-import Admin from './pages/Admin';
+import AdminPortal from './pages/AdminPortal';
+import AdminAdvancedSettings from './pages/AdminAdvancedSettings';
 import './styles.css';
 import './admin-fixes.css';
 
@@ -29,7 +30,8 @@ createRoot(root).render(
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login/>}/>
-        <Route path="/admin" element={<Admin/>}/>
+        <Route path="/admin" element={<AdminPortal/>}/>
+        <Route path="/admin/settings" element={<AdminAdvancedSettings/>}/>
         <Route element={<Layout/>}>
           <Route index element={<Home/>}/>
           <Route path="apps" element={<Apps/>}/>
