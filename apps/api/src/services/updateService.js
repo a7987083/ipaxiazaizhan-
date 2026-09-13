@@ -169,6 +169,8 @@ export async function queueOnlineUpdate({requestedBy='admin',channel='stable'}={
   };
   await fs.writeFile(STATUS_FILE,JSON.stringify(queued,null,2)+'\n',{mode:0o640});
   try {
+    // Web-triggered updates are forward-only: fixed channel, pinned preview ref,
+    // force=false, and never arbitrary refs supplied by the browser.
     const request={channel,force:false,targetVersion:target.latestVersion,requestedBy,requestedAt:now};
     if (channel==='preview') request.ref=target.ref;
     await fs.writeFile(REQUEST_FILE,JSON.stringify(request,null,2)+'\n',{flag:'wx',mode:0o600});
