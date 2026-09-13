@@ -1,5 +1,20 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091227 Replica reconciliation persistence + Alias distribution UX
+
+- 修复“云盘副本”对账结果只存在浏览器内存、切换后台页面后消失的问题。最新对账现在持久化到 `CONTROL_DIR/openlist-replica-preview.json`，重新进入页面、刷新浏览器或 Node 服务重启后均可恢复。
+- 保存或修改副本配置时主动清除旧对账快照，避免挂载/根目录变化后继续展示过期结果。
+- 多网盘结果新增单盘收起/展开，以及“全部展开 / 全部收起”；多个网盘默认仅展开第一个，避免长页面连续滚动。
+- “数据库不存在的多余 IPA”改为简洁的“多余 IPA”，所有多余项自动列出并按 100 条/页分页；缺失 IPA 同样按 100 条/页分页，不再只显示前 50/100 条。
+- 分流设置从原先的 Alias 路径文本框升级为可操作向导：自动发现 OpenList Alias、下拉选择 Alias、生成所选实体副本目录清单、支持一键复制 Alias 路径，并生成 Alias 公开下载根地址。
+- 后台明确给出实际使用顺序：在 OpenList Alias 中加入所有副本目录，读取冲突策略选“按文件负载均衡”，回到 ZONOE 选择 Alias 并保存，完成副本对账后通过 Alias `/d/<alias>/...` 路径提供下载。
+- 明确重要边界：1227 不自动创建/修改 OpenList Alias，也不自动批量重写 MySQL `bt1a`。仍指向实体盘 `/d/a/app/...` 的下载地址会绕过 Alias，不会参与分流。
+- IPA 元数据页把 `OpenList Token` 文案改成 `OpenList 令牌`，并指向 OpenList “设置 → 其他 → 令牌”的程序固定令牌。后端仍按 OpenList API 要求将令牌原值放入 `Authorization`，不添加 `Bearer`。
+- 新增 `replica-admin-ux.contract.test.js`，覆盖对账持久化、100 条分页、收起/展开、Alias 配置向导、令牌文案。
+- Actions #116 首次失败仅因为旧 1226 回归测试把 VERSION 精确固定为 `2026091226`；1227 新增功能测试当轮均已通过。随后把该测试改为“1226 或更高版本必须继续满足账号切换修复契约”，未修改业务逻辑。
+- Actions #117 / run `34790323206`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、部署包构建/校验/Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
+- 真实 BaoTa 页面切换恢复、真实 Alias 覆盖和“按文件负载均衡”下载仍待 E2E 验证。
+
 ## 2026-09-14 — 2026091226 Account-independent IPA metadata persistence
 
 - 修复更换 OpenList/云盘账号、挂载路径或下载路径后，之前 IPA 解析结果从解析库消失的问题。
