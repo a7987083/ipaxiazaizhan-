@@ -12,7 +12,12 @@ const OPENLIST_FILE = path.join(CONTROL_DIR, 'openlist.json');
 const IPA_CACHE_FILE = path.join(CONTROL_DIR, 'openlist-ipa-cache.json');
 const OPENLIST_DIR_CACHE_FILE = path.join(CONTROL_DIR, 'openlist-directory-cache.json');
 const OPENLIST_TASK_FILE = path.join(CONTROL_DIR, 'openlist-task.json');
+const WRITEBACK_LOG_FILE = path.join(CONTROL_DIR, 'ipa-writeback-log.jsonl');
 const DOWNLOAD_DIR = path.join(CONTROL_DIR, 'downloads');
+
+const IPA_SYNC_FIELDS=['name','version','build','bundle_id','minimum_ios','executable','size','md5'];
+const IPA_SYNC_STRATEGIES=new Set(['always','if_empty','if_changed','preview']);
+const IPA_SYNC_MODES=new Set(['disabled','preview','auto_update']);
 
 let writeQueue = Promise.resolve();
 
@@ -46,6 +51,18 @@ function normalizeSchedule(input={}) {
   };
 }
 
+export function normalizeIpaSync(input={}) {
+  const mode=IPA_SYNC_MODES.has(String(input?.mode||''))?String(input.mode):'disabled';
+  const mappings={};
+  for(const field of IPA_SYNC_FIELDS){
+    const raw=input?.mappings?.[field]||{};
+    const column=String(raw.column||'').trim();
+    const strategy=IPA_SYNC_STRATEGIES.has(String(raw.strategy||''))?String(raw.strategy):'if_changed';
+    mappings[field]={enabled:raw.enabled===true && Boolean(column),column,strategy};
+  }
+  return {mode,mappings};
+}
+
 function publicSource(row) {
   let cfg={};
   try { cfg=decryptJson(row.configEncrypted); } catch {}
@@ -62,6 +79,7 @@ function publicSource(row) {
     username: cfg.username || '',
     table: cfg.table || 'fa_category',
     writeStats: cfg.writeStats === true,
+    ipaSync: normalizeIpaSync(cfg.ipaSync),
     created_at: row.createdAt,
     updated_at: row.updatedAt,
     base_url: cfg.database ? `${cfg.host||'127.0.0.1'}:${cfg.port||3306}/${cfg.database}` : ''
@@ -151,6 +169,13 @@ export async function setSetting(key,value) {
   const s=await getSettings(); s[key]=value; await writeJson(SETTINGS_FILE,s); return s;
 }
 
+export async function setSettings(values={}) {
+  const s=await getSettings();
+  for(const [key,value] of Object.entries(values||{})) s[key]=value;
+  await writeJson(SETTINGS_FILE,s);
+  return s;
+}
+
 export async function listMysqlSources({withSecrets=false}={}) {
   await ensureControlInitialized();
   const rows=await readJson(SOURCES_FILE, []);
@@ -179,7 +204,10 @@ export async function createMysqlSource(data) {
   const slug=cleanSlug(data.slug || data.name);
   if(rows.some(x=>x.slug===slug)) throw Object.assign(new Error('软件源 slug 已存在'),{code:'SOURCE_SLUG_EXISTS'});
   const now=new Date().toISOString();
-  const cfg={host:data.host,port:Number(data.port||3306),database:data.database,username:data.username,password:data.password,table:data.table||'fa_category',writeStats:data.writeStats===true};
+  const cfg={
+    host:data.host,port:Number(data.port||3306),database:data.database,username:data.username,password:data.password,
+    table:data.table||'fa_category',writeStats:data.writeStats===true,ipaSync:normalizeIpaSync(data.ipaSync)
+  };
   const row={id,name:data.name,slug,enabled:data.enabled!==false,priority:Number(data.priority||100),configEncrypted:encryptJson(cfg),createdAt:now,updatedAt:now};
   rows.push(row); await writeJson(SOURCES_FILE,rows); return publicSource(row);
 }
@@ -198,6 +226,7 @@ export async function updateMysqlSource(id,data) {
   if(data.port!==undefined) cfg.port=Number(data.port||3306);
   if(data.password) cfg.password=data.password;
   if(data.writeStats!==undefined) cfg.writeStats=!!data.writeStats;
+  if(data.ipaSync!==undefined) cfg.ipaSync=normalizeIpaSync(data.ipaSync);
   row.configEncrypted=encryptJson(cfg); row.updatedAt=new Date().toISOString(); rows[idx]=row;
   await writeJson(SOURCES_FILE,rows); return publicSource(row);
 }
@@ -288,6 +317,58 @@ export async function writeOpenListTask(value) {
   return normalized;
 }
 
+async function statSafe(file){
+  try{ const s=await fs.stat(file); return {exists:true,size:Number(s.size||0),updatedAt:s.mtime?.toISOString?.()||null}; }
+  catch(e){ if(e?.code==='ENOENT') return {exists:false,size:0,updatedAt:null}; throw e; }
+}
+
+export async function getLocalCacheStatus(){
+  await ensureControlInitialized();
+  const [ipa,dirs,task,ipaStat,dirStat,taskStat]=await Promise.all([
+    readOpenListIpaCache(),readOpenListDirectoryCache(),readOpenListTask(),statSafe(IPA_CACHE_FILE),statSafe(OPENLIST_DIR_CACHE_FILE),statSafe(OPENLIST_TASK_FILE)
+  ]);
+  const files=Object.values(ipa.files||{});
+  const directoryEntries=Object.values(dirs.directories||{});
+  return {
+    totalBytes:ipaStat.size+dirStat.size+taskStat.size,
+    ipa:{...ipaStat,files:files.length,parsed:files.filter(x=>x?.parsed).length,failed:files.filter(x=>x?.parseError).length,pending:files.filter(x=>!x?.missing&&(!x?.parsed||(x?.md5&&x?.parsedMd5!==x?.md5))).length,lastSync:ipa.lastSync||null},
+    directory:{...dirStat,directories:directoryEntries.length,scopeKey:String(dirs.scopeKey||'')},
+    task:{...taskStat,state:task?.state||'idle',stage:task?.stage||'idle'}
+  };
+}
+
+export async function clearLocalCache(scope='directory'){
+  await ensureControlInitialized();
+  if(scope==='directory') await writeOpenListDirectoryCache({version:1,scopeKey:'',directories:{}});
+  else if(scope==='ipa') await writeOpenListIpaCache({version:3,files:{},apps:{},appRefs:{},missingEntries:[],lastSync:null});
+  else if(scope==='failed'){
+    const cache=await readOpenListIpaCache();
+    for(const file of Object.values(cache.files||{})){
+      if(file?.parseError){ file.parseError=''; file.nextParseAfter=null; file.lastParseAttemptAt=null; }
+    }
+    await writeOpenListIpaCache(cache);
+  } else if(scope==='task') await writeOpenListTask({state:'idle',stage:'idle',message:'',progress:{}});
+  else if(scope==='all'){
+    await writeOpenListDirectoryCache({version:1,scopeKey:'',directories:{}});
+    await writeOpenListIpaCache({version:3,files:{},apps:{},appRefs:{},missingEntries:[],lastSync:null});
+    await writeOpenListTask({state:'idle',stage:'idle',message:'',progress:{}});
+  } else throw Object.assign(new Error('未知缓存清理范围'),{code:'CACHE_SCOPE_INVALID'});
+  return getLocalCacheStatus();
+}
+
+export async function appendWritebackLog(event){
+  await ensureControlInitialized();
+  await fs.appendFile(WRITEBACK_LOG_FILE,JSON.stringify(event)+'\n',{mode:0o600});
+}
+
+export async function readWritebackLog(limit=100){
+  limit=Math.min(500,Math.max(1,Number(limit)||100));
+  try{
+    const text=await fs.readFile(WRITEBACK_LOG_FILE,'utf8');
+    return text.split('\n').filter(Boolean).slice(-limit).reverse().map(line=>{try{return JSON.parse(line)}catch{return null}}).filter(Boolean);
+  }catch(e){ if(e?.code==='ENOENT') return []; throw e; }
+}
+
 export async function appendDownloadEvent(event) {
   await ensureControlInitialized();
   const day=new Date().toISOString().slice(0,10);
@@ -301,4 +382,4 @@ export async function countTodayDownloads() {
   catch(e){ if(e?.code==='ENOENT') return 0; throw e; }
 }
 
-export { CONTROL_DIR, DOWNLOAD_DIR, IPA_CACHE_FILE, OPENLIST_DIR_CACHE_FILE, OPENLIST_TASK_FILE, normalizeSchedule };
+export { CONTROL_DIR, DOWNLOAD_DIR, IPA_CACHE_FILE, OPENLIST_DIR_CACHE_FILE, OPENLIST_TASK_FILE, WRITEBACK_LOG_FILE, normalizeSchedule, IPA_SYNC_FIELDS };
