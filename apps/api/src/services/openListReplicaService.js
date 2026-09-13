@@ -2,6 +2,7 @@ import path from 'node:path';
 import { listMysqlSources,getOpenListConfig,readOpenListIpaCache,readOpenListReplicaConfig,writeOpenListReplicaConfig } from '../storage/controlStore.js';
 import { fromHex,parseTsv,runMysql,safeIdentifier } from './mysqlCli.js';
 import { publicUrlToApiPath } from './openListMetadataService.js';
+import { readReplicaPreview,writeReplicaPreview,clearReplicaPreview } from './replicaPreviewStore.js';
 
 const PAGE_SIZE=500;
 const MAX_SCAN_FILES=20000;
@@ -141,14 +142,14 @@ function aliasStatus(storages,config){
 }
 
 async function context(){
-  const row=await getOpenListConfig({withSecret:true});if(!row?.config?.url||!row?.config?.token)throw err('OPENLIST_CONFIG_REQUIRED','请先配置 OpenList URL 和 Token');
+  const row=await getOpenListConfig({withSecret:true});if(!row?.config?.url||!row?.config?.token)throw err('OPENLIST_CONFIG_REQUIRED','请先配置 OpenList URL 和令牌');
   return {row,config:row.config,replica:await readOpenListReplicaConfig()};
 }
 
 export async function getReplicaManagerState(){
   const {config,replica}=await context();let storages=[],storageError=null;
   try{storages=await listOpenListStorages(config)}catch(e){storageError=e?.message||'无法读取 OpenList 存储列表'}
-  return {config:replica,storages:storages.map(publicStorage),storageError,alias:storages.length?aliasStatus(storages,replica):null};
+  return {config:replica,openListUrl:String(config.url||''),storages:storages.map(publicStorage),storageError,alias:storages.length?aliasStatus(storages,replica):null,lastPreview:await readReplicaPreview()};
 }
 
 export async function saveReplicaManagerConfig(input){
@@ -160,7 +161,9 @@ export async function saveReplicaManagerConfig(input){
     return {storageId:storage.id,mountPath:storage.mountPath,rootPath,enabled:x.enabled!==false,writable:x.writable===true,label:String(x.label||storage.remark||storage.mountPath)};
   });
   const ids=mounts.map(x=>x.storageId);if(new Set(ids).size!==ids.length)throw err('REPLICA_CONFIG_INVALID','同一个 OpenList 存储不能重复选择');
-  return writeOpenListReplicaConfig({...input,mounts});
+  const saved=await writeOpenListReplicaConfig({...input,mounts});
+  await clearReplicaPreview();
+  return saved;
 }
 
 export async function previewReplicas(){
@@ -174,7 +177,9 @@ export async function previewReplicas(){
     catch(e){snapshots.push({...mount,label:mount.label||storage.remark||storage.mountPath,files:{},error:e?.message||'扫描失败'})}
   }
   const diff=buildReplicaDiff(expected.items,snapshots);
-  return {...diff,ignoredDatabaseRefs:expected.ignored,sourceErrors:expected.sourceErrors,alias:aliasStatus(storages,replica),permissions:{allowCopy:replica.allowCopy,allowRename:replica.allowRename,allowQuarantine:replica.allowQuarantine}};
+  const result={...diff,generatedAt:new Date().toISOString(),ignoredDatabaseRefs:expected.ignored,sourceErrors:expected.sourceErrors,alias:aliasStatus(storages,replica),permissions:{allowCopy:replica.allowCopy,allowRename:replica.allowRename,allowQuarantine:replica.allowQuarantine}};
+  await writeReplicaPreview(result);
+  return result;
 }
 
 async function ensureDir(config,dir){
