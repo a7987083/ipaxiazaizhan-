@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { requireAdmin,requireCsrf } from '../middleware/auth.js';
 import { asyncHandler,ok,AppError } from '../utils/http.js';
 import {
-  getReplicaManagerState,saveReplicaManagerConfig,previewReplicas,previewReplicaSyncPlan,syncMissingReplicas,renameReplicaSuggestion,quarantineReplicaExtras
+  getReplicaManagerState,saveReplicaManagerConfig,previewReplicas,previewReplicaSyncPlan,syncMissingReplicas,renameReplicaSuggestion,quarantineReplicaExtras,
+  getReplicaOperations,verifyReplicaOperationsNow
 } from '../services/openListReplicaService.js';
 
 const r=Router();
@@ -43,6 +44,14 @@ r.post('/openlist/replicas/sync-plan',asyncHandler(async(req,res)=>{
 r.post('/openlist/replicas/sync',asyncHandler(async(req,res)=>{
   const p=syncSchema.extend({planHash:z.string().regex(/^[a-f0-9]{64}$/i).optional().default('')}).parse(req.body||{});
   try{ok(res,await syncMissingReplicas(p))}catch(e){throw mapError(e)}
+}));
+r.get('/openlist/replicas/operations',asyncHandler(async(req,res)=>{
+  const p=z.object({limit:z.coerce.number().int().min(1).max(200).default(100)}).parse(req.query||{});
+  try{ok(res,await getReplicaOperations(p))}catch(e){throw mapError(e)}
+}));
+r.post('/openlist/replicas/operations/verify',asyncHandler(async(req,res)=>{
+  const p=z.object({limit:z.coerce.number().int().min(1).max(100).default(100)}).parse(req.body||{});
+  try{ok(res,await verifyReplicaOperationsNow(p))}catch(e){throw mapError(e)}
 }));
 r.post('/openlist/replicas/rename',asyncHandler(async(req,res)=>{
   const p=z.object({storageId:z.coerce.number().int().positive(),fromRelative:z.string().min(1).max(2000),toRelative:z.string().min(1).max(2000)}).parse(req.body||{});
