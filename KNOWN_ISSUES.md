@@ -1,16 +1,18 @@
 # Known Issues
 
-## 2026091229 candidate
+## 2026091230 candidate
 
-- Actions #142 / run `34838613229` passed source tests, production build, smoke/contracts, deployment package validation and artifact upload. Real BaoTa/OpenList 1229 behavior is still pending production verification.
+- Actions #150 / run `34847017796` passed source tests, production build, smoke/contracts, deployment package validation and artifact upload. Real BaoTa/OpenList 1230 recheck is still pending.
+- 1230 fixes the Range Parser summary `NaN` defect. The backend usage store was already returning numeric counters; the bug was in the admin presentation layer, where the shared numeric `Card` coerced formatted strings such as `4/10` and `0.5 MB` through `Number(...)`. Formatted Range values now use a text-preserving stat card.
+- Scheduled parsing is configurable again. Runtime now honors saved values within the existing API range: 5–1440 minutes and 1–20 IPA per run. The recommended default remains 15 minutes / 1 IPA.
+- Scheduler configurability does not bypass safety budgets. Parsing remains sequential and the rolling hard limits remain 10 attempts/hour and 150 attempts/day. A configured run can therefore execute fewer files than requested if the remaining budget is smaller.
+- 1229 reconciliation persistence had a schema-normalization bug: `replicaPreviewStore.normalize()` dropped `replicaSchemaVersion`, while `previewCompatible()` required it. Every persisted 1229 preview therefore looked incompatible after being read back. 1230 preserves the field so navigation/reload restores the reconciliation list again.
+- Preview JSON produced by buggy 1229 does not contain `replicaSchemaVersion`; 1230 intentionally cannot trust that one old file. Run one reconciliation after upgrade. This is a one-time rebuild of the preview layer, not necessarily a full cloud rescan: the separate 30-minute per-drive directory snapshot file remains reusable when fresh.
+- Per-drive directory snapshots still expire after 30 minutes. “对账（优先快照）” should reuse fresh snapshots; “强制刷新全部” and “只刷新这个盘” intentionally bypass the relevant snapshot cache.
+- The OpenList storage/mount discovery list itself is still requested from the OpenList admin API when the replica manager state is loaded. The high-cost IPA tree is the part protected by persisted per-drive snapshots. If production measurements show storage-list traffic matters, a small separate storage-list TTL cache can be added later.
 - Integrity verification is only as strong as the expected metadata available to ZONOE. When the metadata cache has a valid expected MD5, equal MD5 is authoritative. When comparable MD5 is unavailable, the file is deliberately marked `unverified`; size alone does not prove identical content.
-- A known size mismatch is treated as an integrity problem when both expected and actual sizes are available. The expected size comes from the OpenList IPA metadata cache, not blindly from a potentially stale database value.
-- MD5/size mismatch files are blocked from automatic source selection and are not automatically overwritten. 1229 intentionally stops at detection/visibility; a later version can add a controlled “quarantine bad copy then refill from verified source” workflow after real validation.
-- Source priority uses the persisted order of selected physical mounts. The admin can move drives up/down. Safety wins over preference: a verified source always outranks an unverified source, even if the unverified drive is ranked higher.
-- Sync planning is a preview, not a copy operation. Execution recomputes the plan and compares the SHA-256 `planHash`; if the action set changed, the backend returns `REPLICA_PLAN_CHANGED` and requires a new preview.
-- The plan hash protects the selected file/source/target action set, but OpenList cross-storage copy can still be asynchronous after submission. A successful `/api/fs/copy` response does not prove the target bytes have finished transferring.
-- Existing 1228 reconciliation previews do not contain the new per-copy integrity states. 1229 therefore does not restore an incompatible old preview as current. Run a new reconciliation after upgrade; the existing 30-minute per-drive directory snapshots may still be reused.
-- Snapshot/listing data can become stale within the configured TTL. Before risky manual remediation of an integrity issue, force-refresh the affected drive rather than relying on an old snapshot.
-- `per_page:0`, targeted refresh, Range Parser budgets, MD5 metadata reuse, Alias behavior, quarantine-only deletion policy and other 1228 safeguards remain unchanged.
-- Real BaoTa/OpenList verification is still required for mismatch detection, source-priority selection, sync-plan preview/execution, stale-plan rejection, 7,000+ file request counts and Range telemetry.
+- MD5/size mismatch files remain blocked from automatic source selection and are not automatically overwritten. Controlled mismatch remediation is still a future workflow.
+- Sync-plan execution still recomputes the SHA-256 `planHash`; if source/target choices changed, `REPLICA_PLAN_CHANGED` requires a new preview.
+- OpenList cross-storage copy may be asynchronous after `/api/fs/copy` accepts a task. A successful submission still does not prove target bytes have finished transferring.
+- Real BaoTa/OpenList verification is still required for 1230 Range display, custom scheduler persistence/execution, preview restoration, snapshot-hit behavior, 1229 integrity/source-priority behavior, Alias load balancing and copy/rename/quarantine E2E.
 - ZONOE still does not automatically create/modify OpenList Alias or rewrite MySQL `bt1a` to Alias paths. Direct physical URLs continue to bypass Alias load balancing.
