@@ -1,6 +1,6 @@
 # Roadmap
 
-## Current — 2026091229 Replica integrity + sync plan + source priority
+## Current — 2026091230 Production hotfix: Range UI + configurable scheduler + replica cache restore
 
 - [x] Public IPA metadata discovery / Bundle ID search / target-iOS filters (2026091221)
 - [x] 中文站点设置、本地缓存、动态数据库同步规则（2026091222–1224）
@@ -8,34 +8,36 @@
 - [x] MD5-addressed IPA metadata persistence independent of OpenList account/path (2026091226)
 - [x] Persisted reconciliation, 100-row pagination, collapsible multi-drive UI and Alias setup guide (2026091227)
 - [x] API scheduling, persistent per-drive snapshots, targeted refresh and Range budgets (2026091228)
-- [x] Classify each expected replica as verified / missing / MD5 mismatch / size mismatch / unverified
-- [x] Stop treating same-path wrong-content files as healthy replicas
-- [x] Never use MD5/size mismatch copies as automatic sync sources
-- [x] Never auto-overwrite integrity-mismatch targets from the missing-copy flow
-- [x] Add read-only sync-plan preview before any cross-storage copy
-- [x] Show every planned `source drive -> target drive` action in admin UI
-- [x] Protect execution with deterministic SHA-256 plan hash and stale-plan rejection
-- [x] Use selected mount order as persistent source priority
-- [x] Prefer verified sources over unverified sources regardless of configured order
-- [x] Preserve per-target planning for one writable drive
-- [x] Ignore incompatible pre-1229 persisted previews while preserving reusable directory snapshots
-- [x] Add contract tests for integrity classification, source selection, target filtering and plan hashing
-- [x] 2026091229 Actions #142 / run `34838613229` passed validation/build/package jobs
-- [ ] Deploy 2026091229 to real BaoTa
-- [ ] Force one fresh reconciliation and verify schema-v2 integrity counts on real drives
-- [ ] Verify one real known-MD5 file reports `verified` on matching drives
-- [ ] Verify a real/disposable mismatch is reported and never selected as source
-- [ ] Preview 20 copy actions and confirm every displayed source/target before execution
-- [ ] Change source order and verify equal-integrity source selection follows the new order
-- [ ] Verify stale plan rejection if reconciliation/config changes between preview and execute
-- [ ] Continue 1228 real OpenList request-count / Range telemetry verification
+- [x] Replica integrity classification + source-priority sync planning + stale-plan protection (2026091229)
+- [x] Fix Range Parser summary `NaN` caused by numeric Card coercing formatted strings
+- [x] Make scheduled parsing actually honor saved `5..1440 minute` / `1..20 IPA` settings instead of silently forcing 15/1
+- [x] Keep rolling Range safety budgets at 10 attempts/hour and 150 attempts/day
+- [x] Preserve single-parser sequential execution
+- [x] Restore persisted replica reconciliation by retaining `replicaSchemaVersion` in `openlist-replica-preview.json`
+- [x] Preserve existing 30-minute per-drive directory snapshot cache and targeted refresh
+- [x] Add/adjust contracts for configurable scheduler, formatted Range UI and persisted replica schema
+- [x] 2026091230 Actions #150 / run `34847017796` passed validation/build/package jobs
+- [ ] Deploy 2026091230 to real BaoTa
+- [ ] Confirm Range summary shows `x/10`, `x/150`, requests and real-read MB without `NaN`
+- [ ] Save a non-default schedule (for example 10 minutes / 2 IPA) and confirm it survives reload and is used by runtime scheduling
+- [ ] Run one post-upgrade reconciliation, navigate away/back, and confirm the list is restored without disappearing
+- [ ] Re-run reconciliation within 30 minutes and confirm per-drive snapshot hits avoid unnecessary cloud scans
+- [ ] Continue 1229 real integrity verification: known-MD5 `verified`, mismatch detection, source-priority selection and stale-plan rejection
 - [ ] Continue real Alias load-balancing, account-switch, copy/rename/quarantine E2E
-- [ ] Next phase: asynchronous copy-task lifecycle and operation audit history
+- [ ] Next feature phase after production recheck: asynchronous copy-task lifecycle and operation audit history
 - [ ] Consider controlled preview/batch migration of MySQL `bt1a` from physical URLs to Alias URLs only after Alias E2E is proven
 
-## Important integrity rule
+## Production observation behind 1230
 
-A file existing at the expected path is no longer sufficient to call the replica healthy. If an expected MD5 is available, matching MD5 is the authoritative integrity check; a known size mismatch is also an error. When no comparable hash is available, the replica is explicitly `unverified`. Automatic copy uses verified sources first, unverified sources only as fallback, and never uses known mismatch copies.
+A real 1229 metadata run reported 7260 database references, 7087 unique IPA paths, 114 missing IPA, 6851 pending parses, and one successful parse using 3 Range requests / about 0.5 MB. Remaining hourly/daily quota was numeric while the formatted summary cards displayed `NaN`, confirming a frontend rendering defect rather than broken backend counters.
+
+## Important scheduler rule
+
+The recommended default remains 15 minutes / 1 IPA, but it is no longer a hidden runtime hard clamp. Administrators may choose 5–1440 minutes and 1–20 IPA per run. Actual parsing is still constrained by the rolling 10/hour and 150/day attempt budgets, and the parser remains sequential.
+
+## Important replica cache rule
+
+The reconciliation result file and per-drive directory snapshots are separate layers. 1230 fixes the reconciliation-result persistence bug by preserving `replicaSchemaVersion`. A preview generated by buggy 1229 lacks that field and must be rebuilt once after upgrade; fresh 30-minute per-drive snapshots can still be reused during that rebuild.
 
 ## Stable baselines
 
@@ -48,5 +50,6 @@ A file existing at the expected path is no longer sufficient to call the replica
 - `2026091225`: OpenList multi-drive replica management; CI passed; real multi-drive E2E pending.
 - `2026091226`: content-addressed IPA parse persistence across account/path changes; CI passed; real account-switch E2E pending.
 - `2026091227`: persisted reconciliation + paginated/collapsible multi-drive UI + Alias distribution guide; CI passed; real Alias E2E pending.
-- `2026091228`: API scheduling, persistent per-drive snapshots, targeted refresh, Range usage telemetry/budgets and core MD5 pre-parse reuse; CI passed; real traffic profile pending.
-- `2026091229`: replica integrity classification + source-priority sync planning + stale-plan protection; CI #142 passed; real multi-drive E2E pending.
+- `2026091228`: API scheduling, persistent per-drive snapshots, targeted refresh, Range usage telemetry/budgets and core MD5 pre-parse reuse; CI passed; real traffic profile partially observed.
+- `2026091229`: replica integrity classification + source-priority sync planning + stale-plan protection; CI passed; production testing exposed three hotfix issues.
+- `2026091230`: Range summary rendering + scheduler configurability + replica preview persistence hotfix; CI #150 passed; real BaoTa recheck pending.
