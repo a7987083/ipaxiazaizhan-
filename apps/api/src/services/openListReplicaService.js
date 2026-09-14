@@ -8,10 +8,20 @@ import {
   REPLICA_SNAPSHOT_TTL_MS,clearReplicaSnapshots,invalidateReplicaSnapshots,
   readReplicaSnapshots,snapshotFresh,snapshotKey,writeReplicaSnapshots
 } from './replicaSnapshotStore.js';
+import {
+  appendReplicaAudit,applyReplicaOperationUpdates,createReplicaCopyBatch,getPendingReplicaCopyOperations,
+  getReplicaBatchesNeedingRefresh,getReplicaOperationState,markReplicaBatchRefresh
+} from './replicaOperationStore.js';
 
 const MAX_SCAN_FILES=20000;
 const MAX_SCAN_DIRS=1000;
 const REPLICA_SCHEMA_VERSION=2;
+export const COPY_VERIFY_TIMEOUT_MS=10*60*1000;
+export const COPY_MISMATCH_CONFIRM_MS=30*1000;
+const COPY_VERIFY_INTERVAL_MS=15*1000;
+const COPY_VERIFY_BATCH=100;
+let replicaVerifierTimer=null;
+let replicaVerifierBusy=false;
 
 function cleanPath(v='/'){
   let s=String(v||'/').trim().replace(/\\/g,'/');
@@ -42,6 +52,8 @@ function replicaScopeKey(config){return `${String(config.url||'').replace(/\/+$/
 function previewFresh(p){const t=Date.parse(String(p?.generatedAt||''));return Number.isFinite(t)&&Date.now()-t<REPLICA_SNAPSHOT_TTL_MS}
 function previewCompatible(p){return Number(p?.replicaSchemaVersion||0)>=REPLICA_SCHEMA_VERSION}
 function makeMetrics(){return {openListRequests:0,fsListRequests:0,storageListRequests:0,fileOperationRequests:0,snapshotHits:0,remoteMountScans:0}}
+function operationKey(x){return `${String(x?.relativePath||'')}|${Number(x?.targetStorageId||0)}`}
+function terminalOperationStatus(status){return ['success','failed','timeout'].includes(String(status||''))}
 
 async function openListRequest(config,apiPath,{method='POST',body,query,timeoutMs=30000,metrics}={}){
   if(metrics){metrics.openListRequests+=1;if(apiPath==='/api/fs/list')metrics.fsListRequests+=1;else if(apiPath==='/api/admin/storage/list')metrics.storageListRequests+=1;else if(apiPath.startsWith('/api/fs/'))metrics.fileOperationRequests+=1}
@@ -50,10 +62,10 @@ async function openListRequest(config,apiPath,{method='POST',body,query,timeoutM
     const base=String(config.url||'').replace(/\/+$/,'');
     const u=new URL(`${base}${apiPath}`);
     for(const [k,v] of Object.entries(query||{}))if(v!==undefined&&v!==null)u.searchParams.set(k,String(v));
-    const options={method,headers:{Authorization:config.token,'User-Agent':'zonoe-openlist-replica/1.2'},signal:controller.signal};
+    const options={method,headers:{Authorization:config.token,'User-Agent':'zonoe-openlist-replica/1.3'},signal:controller.signal};
     if(body!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body)}
     const res=await fetch(u,options);const json=await res.json().catch(()=>null);
-    if(!res.ok||!json||json.code!==200)throw err('OPENLIST_API_FAILED',json?.message||`OpenList HTTP ${res.status}`,{status:res.status,apiPath});
+    if(!res.ok||!json||json.code!==200)throw err('OPENLIST_API_FAILED',json?.message||`OpenList HTTP ${res.status}`,{status:res.status,apiPath,openListCode:json?.code});
     return json.data;
   }finally{clearTimeout(timer)}
 }
@@ -256,13 +268,16 @@ export function buildReplicaSyncPlan(preview,replica,{limit=20,targetStorageIds=
       if(status!=='missing')continue;
       if(state?.renameSuggestions?.some(x=>x.toRelative===row.relativePath)){skippedRename+=1;continue}
       if(!source){rowNeedsSource=true;continue}
-      actions.push({relativePath:row.relativePath,sourceStorageId:Number(source.mount.storageId),sourceLabel:source.mount.label||source.mount.mountPath,sourceStatus:source.status,targetStorageId:id,targetLabel:target.label||target.mountPath});
+      actions.push({
+        relativePath:row.relativePath,sourceStorageId:Number(source.mount.storageId),sourceLabel:source.mount.label||source.mount.mountPath,sourceStatus:source.status,
+        targetStorageId:id,targetLabel:target.label||target.mountPath,sourceRootPath:String(source.mount.rootPath||''),targetRootPath:String(target.rootPath||''),expectedMd5:String(row.md5||'').toUpperCase(),expectedSize:Number(row.size||0)
+      });
       if(actions.length>=cap)break;
     }
     if(rowNeedsSource)skippedNoSource+=1;
     if(actions.length>=cap)break;
   }
-  const hashBody=actions.map(x=>[x.relativePath,x.sourceStorageId,x.sourceStatus,x.targetStorageId]);
+  const hashBody=actions.map(x=>[x.relativePath,x.sourceStorageId,x.sourceStatus,x.sourceRootPath,x.targetStorageId,x.targetRootPath,x.expectedMd5,x.expectedSize]);
   const planHash=createHash('sha256').update(JSON.stringify(hashBody)).digest('hex');
   return {
     generatedAt:new Date().toISOString(),previewGeneratedAt:preview?.generatedAt||null,limit:cap,targetStorageIds:[...targetSet],
@@ -276,22 +291,158 @@ export async function previewReplicaSyncPlan({limit=20,targetStorageIds=[]}={}){
   return buildReplicaSyncPlan(await currentPreview(),replica,{limit,targetStorageIds});
 }
 
+export function evaluateReplicaCopyVerification(operation,actual,now=Date.now()){
+  const started=Date.parse(String(operation?.submittedAt||operation?.createdAt||''));
+  const elapsed=Number.isFinite(started)?Math.max(0,now-started):0;
+  const expired=elapsed>=COPY_VERIFY_TIMEOUT_MS;
+  const expectedMd5=String(operation?.expectedMd5||'').toUpperCase();
+  const expectedSize=Number(operation?.expectedSize||0);
+  if(!actual){
+    if(expired)return {status:'timeout',verification:'not_found',message:'复制验证超时：目标文件仍未出现'};
+    return {status:'waiting',verification:'waiting',message:'等待 OpenList/网盘完成复制'};
+  }
+  const actualMd5=String(actual?.md5||'').toUpperCase();
+  const actualSize=Number(actual?.size||0);
+  if(expectedMd5&&actualMd5&&expectedMd5!==actualMd5){
+    if(elapsed<COPY_MISMATCH_CONFIRM_MS)return {status:'verifying',verification:'md5_mismatch_pending',message:'目标文件已出现，但 MD5 暂不一致；等待最终一致性'};
+    return {status:'failed',verification:'md5_mismatch',message:'复制后 MD5 与期望不一致'};
+  }
+  if(expectedSize>0&&actualSize>0&&expectedSize!==actualSize){
+    if(elapsed<COPY_MISMATCH_CONFIRM_MS)return {status:'verifying',verification:'size_mismatch_pending',message:'目标文件已出现，但大小暂不一致；等待最终一致性'};
+    return {status:'failed',verification:'size_mismatch',message:'复制后文件大小与期望不一致'};
+  }
+  if(expectedMd5&&actualMd5&&expectedMd5===actualMd5)return {status:'success',verification:'md5',message:'复制完成，MD5 一致'};
+  if(expectedSize>0&&actualSize===expectedSize)return {status:'success',verification:expectedMd5?'size_only_no_hash':'size',message:expectedMd5?'复制完成；目标驱动未返回 MD5，文件大小一致':'复制完成，文件大小一致'};
+  if(actualSize>0||actualMd5)return {status:'success',verification:'presence_only',message:'复制完成；缺少可比较的期望 Hash/大小'};
+  if(expired)return {status:'timeout',verification:'incomplete_metadata',message:'目标条目已出现，但验证信息持续不完整'};
+  return {status:'verifying',verification:'incomplete_metadata',message:'目标条目已出现，等待验证信息'};
+}
+
+function permanentVerificationError(e){
+  const status=Number(e?.details?.status||0);const msg=String(e?.message||'');
+  return status===401||status===403||/unauthor|forbidden|permission|权限|令牌|token/i.test(msg);
+}
+async function inspectReplicaCopyTarget(config,target,operation,metrics,directoryCache){
+  const rootPath=String(operation.targetRootPath||target?.rootPath||'');if(!rootPath)throw err('REPLICA_TARGET_CONFIG_MISSING','找不到复制任务提交时的目标副本目录');
+  const full=fullFromRelative(rootPath,operation.relativePath);
+  const detail=await openListRequest(config,'/api/fs/get',{body:{path:full,password:''},timeoutMs:15000,metrics});
+  const actual={size:Number(detail?.size||0),md5:md5Of(detail)};
+  if(operation.expectedMd5&&!actual.md5){
+    const dir=path.posix.dirname(full),name=path.posix.basename(full),key=`${Number(operation.targetStorageId)}|${dir}`;
+    let content=directoryCache.get(key);
+    if(!content){
+      const listed=await openListRequest(config,'/api/fs/list',{body:{path:dir,password:'',page:1,per_page:0,refresh:false},timeoutMs:20000,metrics});
+      content=Array.isArray(listed?.content)?listed.content:[];directoryCache.set(key,content);
+    }
+    const item=content.find(x=>String(x?.name||'')===name);
+    if(item){actual.size=Number(item?.size||actual.size||0);actual.md5=md5Of(item)}
+  }
+  return actual;
+}
+
+export async function getReplicaOperations({limit=100}={}){return getReplicaOperationState({limit})}
+
+export async function verifyReplicaOperationsNow({limit=COPY_VERIFY_BATCH}={}){
+  if(replicaVerifierBusy)return {busy:true,state:await getReplicaOperationState({limit:100})};
+  replicaVerifierBusy=true;
+  const metrics=makeMetrics();let checked=0,terminal=0;
+  try{
+    const pending=await getPendingReplicaCopyOperations(Math.min(COPY_VERIFY_BATCH,Math.max(1,Number(limit)||COPY_VERIFY_BATCH)));
+    const refreshBefore=await getReplicaBatchesNeedingRefresh(20);
+    if(!pending.length&&!refreshBefore.length)return {busy:false,checked:0,terminal:0,apiStats:metrics,state:await getReplicaOperationState({limit:100})};
+    let ctx=null;
+    try{ctx=await context()}catch(e){return {busy:false,checked:0,terminal:0,error:e?.message||'副本配置不可用',apiStats:metrics,state:await getReplicaOperationState({limit:100})}}
+    const {config,replica}=ctx;const currentScope=replicaScopeKey(config);const targets=new Map((replica.mounts||[]).map(x=>[Number(x.storageId),x]));const directoryCache=new Map();const updates=[],audits=[];
+    for(const operation of pending){
+      checked+=1;const now=Date.now();const target=targets.get(Number(operation.targetStorageId));let result,actual=null,verifyError='';
+      if(operation.scopeKey&&operation.scopeKey!==currentScope){
+        result={status:'failed',verification:'scope_changed',message:'OpenList 配置/令牌已变化，停止验证旧账号复制任务'};
+      }else if(!operation.targetRootPath&&!target){
+        result={status:'failed',verification:'target_config_missing',message:'找不到复制任务提交时的目标副本目录'};
+      }else{
+        try{actual=await inspectReplicaCopyTarget(config,target,operation,metrics,directoryCache);result=evaluateReplicaCopyVerification(operation,actual,now)}
+        catch(e){
+          verifyError=String(e?.message||'验证目标文件失败');
+          if(permanentVerificationError(e))result={status:'failed',verification:'api_permission_error',message:`验证失败：${verifyError}`};
+          else result=evaluateReplicaCopyVerification(operation,null,now);
+        }
+      }
+      const done=terminalOperationStatus(result.status);if(done)terminal+=1;
+      const patch={
+        id:operation.id,status:result.status,verification:result.verification,message:result.message,error:done&&result.status!=='success'?(verifyError||result.message):verifyError,
+        attempts:Number(operation.attempts||0)+1,lastCheckedAt:new Date(now).toISOString(),actualMd5:String(actual?.md5||operation.actualMd5||''),actualSize:Number(actual?.size||operation.actualSize||0),completedAt:done?new Date(now).toISOString():null
+      };
+      updates.push(patch);
+      if(done)audits.push({
+        type:'copy_verify',status:result.status,batchId:operation.batchId,relativePath:operation.relativePath,sourceStorageId:operation.sourceStorageId,targetStorageId:operation.targetStorageId,
+        verification:result.verification,message:result.message
+      });
+    }
+    if(updates.length)await applyReplicaOperationUpdates(updates,audits);
+
+    const needRefresh=await getReplicaBatchesNeedingRefresh(20);
+    if(needRefresh.length){
+      const stale=needRefresh.filter(x=>x.scopeKey&&x.scopeKey!==currentScope);
+      const current=needRefresh.filter(x=>!x.scopeKey||x.scopeKey===currentScope);
+      const skippedAt=new Date().toISOString();
+      for(const batch of stale)await markReplicaBatchRefresh(batch.id,{refreshedAt:skippedAt,refreshError:'OpenList 配置已变化，未刷新旧账号目标盘'},{type:'copy_target_refresh',status:'skipped',message:'OpenList 配置已变化，跳过旧账号目标盘刷新'});
+      if(current.length){
+        const storageIds=[...new Set(current.flatMap(x=>x.targetStorageIds||[]).map(Number).filter(Number.isFinite))];
+        try{
+          if(storageIds.length){await invalidateReplicaSnapshots(currentScope,storageIds);await previewReplicas({forceRefresh:true,storageIds})}
+          const at=new Date().toISOString();
+          for(const batch of current)await markReplicaBatchRefresh(batch.id,{refreshedAt:at,refreshError:''},{type:'copy_target_refresh',status:'success',message:`复制批次结束后已自动刷新 ${batch.targetStorageIds?.length||0} 个目标盘`});
+        }catch(e){
+          for(const batch of current)await markReplicaBatchRefresh(batch.id,{refreshError:e?.message||'目标盘刷新失败'},{type:'copy_target_refresh',status:'failed',message:e?.message||'目标盘刷新失败'});
+        }
+      }
+    }
+    return {busy:false,checked,terminal,apiStats:metrics,state:await getReplicaOperationState({limit:100})};
+  }finally{replicaVerifierBusy=false}
+}
+
+function kickReplicaVerifier(delayMs=1000){
+  const timer=setTimeout(()=>verifyReplicaOperationsNow().catch(e=>console.warn('replica copy verifier failed',e?.message||e)),Math.max(0,Number(delayMs)||0));
+  timer.unref?.();
+}
+export function startReplicaOperationVerifier(){
+  if(replicaVerifierTimer)return;
+  kickReplicaVerifier(1500);
+  replicaVerifierTimer=setInterval(()=>verifyReplicaOperationsNow().catch(e=>console.warn('replica copy verifier failed',e?.message||e)),COPY_VERIFY_INTERVAL_MS);
+  replicaVerifierTimer.unref?.();
+}
+export function stopReplicaOperationVerifier(){if(replicaVerifierTimer){clearInterval(replicaVerifierTimer);replicaVerifierTimer=null}}
+
 export async function syncMissingReplicas({limit=20,targetStorageIds=[],planHash=''}={}){
   const {config,replica}=await context();if(!replica.enabled)throw err('REPLICA_DISABLED','云盘副本管理尚未启用');if(!replica.allowCopy)throw err('REPLICA_COPY_DISABLED','请先开启“允许副本复制”');
   const preview=await currentPreview();const plan=buildReplicaSyncPlan(preview,replica,{limit,targetStorageIds});
-  if(planHash&&String(planHash)!==plan.planHash)throw err('REPLICA_PLAN_CHANGED','副本状态或来源优先级已变化，请重新预览补齐计划',{expected:plan.planHash,received:String(planHash)});
+  if(planHash&&String(planHash)!==plan.planHash)throw err('REPLICA_PLAN_CHANGED','副本状态、期望文件或来源优先级已变化，请重新预览补齐计划',{expected:plan.planHash,received:String(planHash)});
   const mountCfg=new Map((replica.mounts||[]).map(x=>[Number(x.storageId),x]));
   const queued=[],failed=[],touched=new Set(),seenDirs=new Set(),metrics=makeMetrics();
   for(const a of plan.actions){
-    const source=mountCfg.get(Number(a.sourceStorageId)),target=mountCfg.get(Number(a.targetStorageId));if(!source||!target)continue;
+    const source=mountCfg.get(Number(a.sourceStorageId)),target=mountCfg.get(Number(a.targetStorageId));
+    if(!source||!target){failed.push({...a,message:'副本配置已变化，找不到来源盘或目标盘'});continue}
     try{
       const src=fullFromRelative(source.rootPath,a.relativePath),dst=fullFromRelative(target.rootPath,a.relativePath);const srcDir=path.posix.dirname(src),dstDir=path.posix.dirname(dst),name=path.posix.basename(src);
       await ensureDir(config,dstDir,seenDirs,metrics);await openListRequest(config,'/api/fs/copy',{body:{src_dir:srcDir,dst_dir:dstDir,names:[name]},metrics});
       queued.push({relativePath:a.relativePath,sourceStorageId:source.storageId,targetStorageId:target.storageId,sourceStatus:a.sourceStatus});touched.add(Number(target.storageId));
-    }catch(e){failed.push({relativePath:a.relativePath,sourceStorageId:a.sourceStorageId,targetStorageId:a.targetStorageId,message:e?.message||'复制失败'})}
+    }catch(e){failed.push({...a,message:e?.message||'复制失败'})}
   }
   if(touched.size)await invalidateReplicaSnapshots(replicaScopeKey(config),[...touched]);
-  return {queued,failed,submitted:plan.actions.length,executedPlanHash:plan.planHash,targetSnapshotsInvalidated:[...touched],apiStats:metrics,note:'OpenList 跨存储复制可能进入后台任务队列；目标盘快照已失效，稍后只刷新目标盘即可确认，不需要全盘重扫。'};
+  const failedByKey=new Map(failed.map(x=>[operationKey(x),x]));const queuedKeys=new Set(queued.map(operationKey));
+  const tracking=await createReplicaCopyBatch({
+    scopeKey:replicaScopeKey(config),planHash:plan.planHash,previewGeneratedAt:plan.previewGeneratedAt,
+    actions:plan.actions.map(a=>{
+      const failure=failedByKey.get(operationKey(a));
+      return {...a,status:queuedKeys.has(operationKey(a))?'submitted':'failed',error:failure?.message||'',message:failure?.message||'OpenList 已接受复制请求，等待目标文件验证'};
+    })
+  });
+  if(queued.length)kickReplicaVerifier(1500);
+  return {
+    queued,failed,submitted:plan.actions.length,executedPlanHash:plan.planHash,trackingBatchId:tracking?.batch?.id||'',trackingBatch:tracking?.batch||null,
+    targetSnapshotsInvalidated:[...touched],apiStats:metrics,
+    note:'OpenList 接受复制后，ZONOE 会持久跟踪任务并自动核验目标文件；有 MD5 时优先确认 MD5，一批任务结束后只刷新相关目标盘。'
+  };
 }
 
 export async function renameReplicaSuggestion({storageId,fromRelative,toRelative}){
@@ -299,10 +450,17 @@ export async function renameReplicaSuggestion({storageId,fromRelative,toRelative
   const preview=await currentPreview();const mount=preview.mounts.find(x=>Number(x.storageId)===Number(storageId));
   const valid=mount?.renameSuggestions?.some(x=>x.fromRelative===fromRelative&&x.toRelative===toRelative);if(!valid)throw err('REPLICA_RENAME_NOT_SUGGESTED','当前对账结果不再支持这条重命名建议，请重新预览');
   const cfg=replica.mounts.find(x=>Number(x.storageId)===Number(storageId));if(!cfg?.writable)throw err('REPLICA_TARGET_READONLY','目标网盘未标记为可写');
-  const metrics=makeMetrics();const source=fullFromRelative(cfg.rootPath,fromRelative);await openListRequest(config,'/api/fs/rename',{body:{path:source,name:path.posix.basename(toRelative)},metrics});
-  await invalidateReplicaSnapshots(replicaScopeKey(config),[Number(storageId)]);
-  const refreshed=await previewReplicas({forceRefresh:true,storageIds:[Number(storageId)]});
-  return {renamed:true,storageId:Number(storageId),fromRelative,toRelative,preview:refreshed,apiStats:metrics};
+  const metrics=makeMetrics();
+  try{
+    const source=fullFromRelative(cfg.rootPath,fromRelative);await openListRequest(config,'/api/fs/rename',{body:{path:source,name:path.posix.basename(toRelative)},metrics});
+    await invalidateReplicaSnapshots(replicaScopeKey(config),[Number(storageId)]);
+    const refreshed=await previewReplicas({forceRefresh:true,storageIds:[Number(storageId)]});
+    await appendReplicaAudit({type:'rename',status:'success',storageId:Number(storageId),fromRelative,toRelative,relativePath:toRelative,message:'按相同 MD5 建议完成名称修复'});
+    return {renamed:true,storageId:Number(storageId),fromRelative,toRelative,preview:refreshed,apiStats:metrics};
+  }catch(e){
+    await appendReplicaAudit({type:'rename',status:'failed',storageId:Number(storageId),fromRelative,toRelative,relativePath:toRelative,message:e?.message||'名称修复失败'}).catch(()=>{});
+    throw e;
+  }
 }
 
 export async function quarantineReplicaExtras({items=[]}={}){
@@ -310,11 +468,18 @@ export async function quarantineReplicaExtras({items=[]}={}){
   const preview=await currentPreview();const selected=(items||[]).slice(0,50),moved=[],failed=[];const today=new Date().toISOString().slice(0,10);const touched=new Set(),seenDirs=new Set(),metrics=makeMetrics();
   for(const item of selected){
     const mount=preview.mounts.find(x=>Number(x.storageId)===Number(item.storageId));const cfg=replica.mounts.find(x=>Number(x.storageId)===Number(item.storageId));
-    if(!mount||mount.error||!cfg?.writable||!mount.extra.some(x=>x.relativePath===item.relativePath)){failed.push({...item,message:'不是当前可隔离的多余 IPA，或目标网盘不可写'});continue}
+    if(!mount||mount.error||!cfg?.writable||!mount.extra.some(x=>x.relativePath===item.relativePath)){
+      const row={...item,message:'不是当前可隔离的多余 IPA，或目标网盘不可写'};failed.push(row);
+      await appendReplicaAudit({type:'quarantine',status:'failed',storageId:Number(item.storageId),relativePath:item.relativePath,message:row.message}).catch(()=>{});continue;
+    }
     try{
       const src=fullFromRelative(cfg.rootPath,item.relativePath),srcDir=path.posix.dirname(src),name=path.posix.basename(src);const relativeDir=path.posix.dirname(item.relativePath)==='.'?'':path.posix.dirname(item.relativePath);
       const dstDir=joinPath(cfg.rootPath,replica.quarantineFolder,today,relativeDir);await ensureDir(config,dstDir,seenDirs,metrics);await openListRequest(config,'/api/fs/move',{body:{src_dir:srcDir,dst_dir:dstDir,names:[name]},metrics});moved.push(item);touched.add(Number(item.storageId));
-    }catch(e){failed.push({...item,message:e?.message||'隔离失败'})}
+      await appendReplicaAudit({type:'quarantine',status:'success',storageId:Number(item.storageId),relativePath:item.relativePath,message:`已移动到 ${replica.quarantineFolder}/${today}`}).catch(()=>{});
+    }catch(e){
+      const row={...item,message:e?.message||'隔离失败'};failed.push(row);
+      await appendReplicaAudit({type:'quarantine',status:'failed',storageId:Number(item.storageId),relativePath:item.relativePath,message:row.message}).catch(()=>{});
+    }
   }
   let refreshed=null;if(touched.size){await invalidateReplicaSnapshots(replicaScopeKey(config),[...touched]);refreshed=await previewReplicas({forceRefresh:true,storageIds:[...touched]})}
   return {moved,failed,quarantineFolder:replica.quarantineFolder,permanentDelete:false,preview:refreshed,apiStats:metrics};
