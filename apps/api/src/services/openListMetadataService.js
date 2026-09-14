@@ -16,7 +16,7 @@ import { appendRangeUsage,getRangeBudgetStatus } from './rangeUsageService.js';
 const PARSER = fileURLToPath(new URL('../../../../scripts/ipa-range-info.py', import.meta.url));
 const DIRECTORY_CACHE_TTL_MS = 30*60*1000;
 const PARSE_RETRY_DELAY_MS = 30*60*1000;
-export const RECOMMENDED_OPENLIST_SCHEDULE={intervalMinutes:15,parseLimit:1,label:'安全默认：每 15 分钟解析 1 个；小时 10 个 / 每日 150 个硬预算'};
+export const RECOMMENDED_OPENLIST_SCHEDULE={intervalMinutes:15,parseLimit:1,label:'建议默认：每 15 分钟解析 1 个；可自定义 5–1440 分钟 / 每轮 1–20 个；小时 10 个 / 每日 150 个硬预算'};
 
 let taskLocked=false;
 let schedulerTimer=null;
@@ -71,8 +71,8 @@ function cacheFresh(fetchedAt){ const t=Date.parse(String(fetchedAt||'')); retur
 function effectiveSchedule(schedule={}){
   return {
     enabled:schedule?.enabled===true,
-    intervalMinutes:Math.max(15,Number(schedule?.intervalMinutes)||15),
-    parseLimit:1
+    intervalMinutes:Math.min(1440,Math.max(5,Number(schedule?.intervalMinutes)||15)),
+    parseLimit:Math.min(20,Math.max(1,Number(schedule?.parseLimit)||1))
   };
 }
 
