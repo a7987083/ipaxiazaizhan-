@@ -1,6 +1,6 @@
 # Roadmap
 
-## Current — 2026091231 Range telemetry-only + sticky admin navigation
+## Current — 2026091232 Replica copy lifecycle + verification + audit
 
 - [x] Public IPA metadata discovery / Bundle ID search / target-iOS filters (2026091221)
 - [x] 中文站点设置、本地缓存、动态数据库同步规则（2026091222–1224）
@@ -10,43 +10,43 @@
 - [x] API scheduling, persistent per-drive snapshots, targeted refresh and Range telemetry (2026091228)
 - [x] Replica integrity classification + source-priority sync planning + stale-plan protection (2026091229)
 - [x] Fix Range summary NaN, make scheduler configurable, restore persisted replica preview schema (2026091230)
-- [x] Remove the fixed 10/hour and 150/day Range Parser attempt caps
-- [x] Keep Range request count / real-read byte telemetry without using it as a quota gate
-- [x] Keep parser single-concurrency and existing schedule/per-run validation (5–1440 minutes, 1–20 IPA/run)
-- [x] Show plain Range totals instead of `x/10`, `x/150` and remove the remaining-quota UI
-- [x] Remove budget-blocked wording/progress from metadata jobs
-- [x] Make the desktop admin left sidebar sticky for long pages
-- [x] Preserve the existing fixed mobile bottom navigation with explicit CSS reset of desktop sticky properties
-- [x] Preserve 1230 persisted replica preview restore and 30-minute per-drive snapshot behavior
-- [x] Add contracts for telemetry-only Range usage, no global quota gating and sticky admin navigation
-- [x] 2026091231 functional Actions #156 / run `34852734004` passed validation/build/package jobs
-- [x] 2026091231 release Actions #157 / run `34853328149` passed validation/build/package jobs and produced the deployment artifact
-- [ ] Deploy 2026091231 to real BaoTa
-- [ ] Save a non-default schedule and confirm it survives reload without server error
-- [ ] Confirm Range summary shows plain hourly/day totals and no `/10`, `/150`, “剩余额度” or “预算拦截”
-- [ ] Confirm parsing continues above the former hourly/daily thresholds and still remains sequential
-- [ ] Scroll a long desktop admin page and confirm the left menu remains visible
-- [ ] Recheck 1230 replica preview persistence and 30-minute snapshot hits
+- [x] Remove fixed 10/hour and 150/day Range Parser attempt quotas and keep telemetry-only usage (2026091231)
+- [x] Keep desktop admin navigation visible on long pages (2026091231)
+- [x] Persist copy batches and per-IPA lifecycle states instead of treating `/api/fs/copy` acceptance as completion
+- [x] Resume unfinished copy verification after API restart
+- [x] Verify copied targets by MD5 where available; explicitly downgrade to size/presence verification when hashes are unavailable
+- [x] Add copy timeout/failure states and operation audit history
+- [x] Add dedicated admin “副本任务” page plus manual verification action
+- [x] Bind sync-plan hash to expected MD5/size and source/target roots
+- [x] Return tracking batch ID after copy submission
+- [x] Refresh only affected target drives after a batch reaches terminal state
+- [x] Prevent failed-only copy batches from scheduling unnecessary target refresh
+- [x] Preserve existing replica preview persistence and 30-minute per-drive snapshot cache
+- [x] Add 1232 contract coverage for lifecycle/verification/audit and failed-only batch handling
+- [ ] Restore GitHub Actions startup. Current 1232 pushes end at `startup_failure` before any job is created; latest checked run `34875645903`.
+- [ ] Run full Integration tests + Production build + API/frontend smoke + BaoTa/native contracts + package validation on the 1232 tree
+- [ ] Produce and validate `2026091232` deployment artifact
+- [ ] Real BaoTa/OpenList: submit a safe 1–5 IPA copy batch and observe `submitted -> waiting/verifying -> terminal`
+- [ ] Real BaoTa/OpenList: confirm MD5 result where provider exposes hash and explicit size-only fallback where it does not
+- [ ] Real BaoTa/OpenList: restart Node during a pending copy and confirm persisted lifecycle resumes
+- [ ] Real BaoTa/OpenList: confirm batch completion refreshes only actual target drives and failed-only submissions refresh none
+- [ ] Real BaoTa/OpenList: confirm copy/verify/refresh/rename/quarantine audit history and absence of secrets/raw URLs
 - [ ] Continue 1229 real integrity verification: known-MD5 `verified`, mismatch detection, source-priority selection and stale-plan rejection
 - [ ] Continue real Alias load-balancing, account-switch, copy/rename/quarantine E2E
-- [ ] Next feature phase: asynchronous copy-task lifecycle and operation audit history
-- [ ] Consider controlled preview/batch migration of MySQL `bt1a` from physical URLs to Alias URLs only after Alias E2E is proven
+- [ ] Next feature phase: controlled mismatch remediation — quarantine bad target, refill from verified source, re-verify, no permanent delete
+- [ ] After real Alias E2E only: controlled preview/canary/batch/rollback migration of MySQL `bt1a` from physical URLs to Alias URLs
 
-## Production observation behind 1231
+## Important 1232 copy rule
 
-The administrator observed that a typical IPA parse usually uses about 2 Range requests and only `0.x MB` of real data. That makes request/byte telemetry and concurrency more meaningful controls than the previous fixed parse-attempt quotas. 1231 therefore removes the 10/hour and 150/day gates while preserving sequential parsing and measured Range traffic.
+An OpenList copy API response only means the request was accepted. ZONOE must keep the operation pending until the target is independently observed and verified. MD5 is authoritative when both expected and target MD5 are available; lack of target hash must be displayed as a weaker verification level rather than a false MD5 success.
 
-## Important scheduler rule
+## Important target-refresh rule
 
-The recommended default remains 15 minutes / 1 IPA, but it is only a default. Administrators may choose 5–1440 minutes and 1–20 IPA per run, and those saved values are now authoritative. There is no longer a separate hourly/daily parser-attempt quota shrinking the run.
+Only drives that actually accepted copy work belong to a tracking batch's target-refresh set. A plan action that fails before `/api/fs/copy` acceptance remains in audit/history as failed but must not cause a later forced target scan.
 
-## Important Range telemetry rule
+## Important scheduler / Range rule retained from 1231
 
-`openlist-range-usage.json` still records attempts, success/failure, Range request count and bytes read. The admin UI shows current-hour/day totals and real traffic. These counters are observability data only; they do not block parsing.
-
-## Important replica cache rule
-
-The reconciliation result file and per-drive directory snapshots remain separate layers. 1230 fixed reconciliation-result persistence by preserving `replicaSchemaVersion`; fresh per-drive snapshots still use a 30-minute TTL and targeted refresh behavior.
+The recommended metadata-parser default remains 15 minutes / 1 IPA but administrators may save 5–1440 minutes and 1–20 IPA per run. Parsing remains single-concurrency. Range attempt/request/byte counters are observability data and no longer enforce the former 10/hour or 150/day global quota.
 
 ## Stable baselines
 
@@ -59,7 +59,8 @@ The reconciliation result file and per-drive directory snapshots remain separate
 - `2026091225`: OpenList multi-drive replica management; CI passed; real multi-drive E2E pending.
 - `2026091226`: content-addressed IPA parse persistence across account/path changes; CI passed; real account-switch E2E pending.
 - `2026091227`: persisted reconciliation + paginated/collapsible multi-drive UI + Alias distribution guide; CI passed; real Alias E2E pending.
-- `2026091228`: API scheduling, persistent per-drive snapshots, targeted refresh, Range telemetry and core MD5 pre-parse reuse; CI passed; real traffic profile partially observed.
+- `2026091228`: API scheduling, persistent per-drive snapshots, targeted refresh and Range telemetry; CI passed.
 - `2026091229`: replica integrity classification + source-priority sync planning + stale-plan protection; CI passed; production E2E pending.
 - `2026091230`: Range summary rendering + scheduler configurability + replica preview persistence hotfix; CI passed.
-- `2026091231`: fixed global Range quotas removed, telemetry-only usage view, sticky desktop admin sidebar; release CI #157 passed; real BaoTa recheck pending.
+- `2026091231`: fixed global Range quotas removed, telemetry-only usage view, sticky desktop admin sidebar; release CI passed; real BaoTa recheck pending.
+- `2026091232`: source implementation for copy lifecycle/verification/audit is committed; CI is currently blocked at GitHub Actions startup before jobs are created, so 1232 is not yet release-verified.
