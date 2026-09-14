@@ -128,7 +128,7 @@ export async function getPendingReplicaCopyOperations(limit=100){
 }
 export async function getReplicaBatchesNeedingRefresh(limit=20){
   const data=await readUnlocked();
-  return data.batches.filter(x=>x.status!=='running'&&!x.refreshedAt&&Number(x.refreshAttempts||0)<3).sort((a,b)=>Date.parse(a.createdAt)-Date.parse(b.createdAt)).slice(0,Math.max(1,Number(limit)||20));
+  return data.batches.filter(x=>x.status!=='running'&&!x.refreshedAt&&Number(x.refreshAttempts||0)<3&&Array.isArray(x.targetStorageIds)&&x.targetStorageIds.length>0).sort((a,b)=>Date.parse(a.createdAt)-Date.parse(b.createdAt)).slice(0,Math.max(1,Number(limit)||20));
 }
 export async function createReplicaCopyBatch({scopeKey='',planHash='',previewGeneratedAt=null,actions=[]}={}){
   const createdAt=nowIso();const batchId=id('copybatch');
@@ -136,10 +136,11 @@ export async function createReplicaCopyBatch({scopeKey='',planHash='',previewGen
     const operations=(actions||[]).map(a=>normalizeOperation({
       ...a,id:id('copy'),batchId,scopeKey,createdAt,submittedAt:a.status==='submitted'?createdAt:null,completedAt:TERMINAL_STATUSES.has(a.status)?createdAt:null
     }));
+    const submitted=operations.filter(x=>x.status==='submitted');
     data.operations.push(...operations);
-    let batch=normalizeBatch({id:batchId,scopeKey,planHash,previewGeneratedAt,targetStorageIds:operations.map(x=>x.targetStorageId),createdAt});
+    let batch=normalizeBatch({id:batchId,scopeKey,planHash,previewGeneratedAt,targetStorageIds:submitted.map(x=>x.targetStorageId),createdAt});
     batch=recomputeBatch(batch,data.operations,createdAt);data.batches.push(batch);
-    data.audit.push(normalizeAudit({type:'copy_batch',status:'submitted',batchId,at:createdAt,message:`计划 ${operations.length} 个；已提交 ${operations.filter(x=>x.status==='submitted').length}；提交失败 ${operations.filter(x=>x.status==='failed').length}`}));
+    data.audit.push(normalizeAudit({type:'copy_batch',status:submitted.length?'submitted':'failed',batchId,at:createdAt,message:`计划 ${operations.length} 个；已提交 ${submitted.length}；提交失败 ${operations.filter(x=>x.status==='failed').length}`}));
     return {batch,operations};
   });
 }
