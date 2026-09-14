@@ -7,7 +7,7 @@ const root=fileURLToPath(new URL('../../../',import.meta.url));
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 
 describe('replica admin UX',()=>{
-  test('reconciliation result is persisted and restored',()=>{
+  test('reconciliation result is persisted and restored with replica schema version',()=>{
     const service=read('apps/api/src/services/openListReplicaService.js');
     const store=read('apps/api/src/services/replicaPreviewStore.js');
     expect(service).toContain('readReplicaPreview');
@@ -15,6 +15,7 @@ describe('replica admin UX',()=>{
     expect(service).toContain('lastPreview:previewCompatible(savedPreview)?savedPreview:null');
     expect(service).toContain('await clearReplicaPreview()');
     expect(store).toContain('openlist-replica-preview.json');
+    expect(store).toContain('replicaSchemaVersion:Number(value.replicaSchemaVersion||0)');
   });
 
   test('multi-drive results are collapsible and extras use 100-row pages',()=>{
