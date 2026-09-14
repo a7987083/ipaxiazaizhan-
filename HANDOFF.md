@@ -2,37 +2,34 @@
 
 - Repo: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
-- Candidate: `2026091230`
-- Baseline: `2026091229` / `f0494e2a57108abe99fcd8dd45e01d9b8715b8cb`
-- Replica preview cache fix: `d6057508b4e8c7bc5dd2eabf3e5743ae00264ef3`
-- Configurable scheduler fix: `0c09e9be12f6ce3606cc523ca5bbb0929f36df51`
-- Range UI fix: `4e9fc191582fcf369b786bef1729ea56acc6d9d5`
-- Final hotfix CI: Actions #150 / run `34847017796` passed validation and package jobs.
-- Real BaoTa/OpenList 1230 recheck: pending.
+- Candidate: `2026091231`
+- Baseline: `2026091230` / `cbbe8065db127619353d4ff2eecbdd2f144bf0f0`
+- Functional code: `4f574815d9ad2fba94ef910f5c2904f19c3937d9`
+- Functional CI: Actions #156 / run `34852734004` passed validation and package jobs.
+- Real BaoTa/OpenList 1231 recheck: pending.
 
-## Why 1230 exists
+## What 1231 changes
 
-Real 1229 runtime testing exposed three concrete regressions/defects:
+1. Removes the old global Range Parser hard caps of 10 parse attempts/hour and 150/day. Scheduled/manual parsing is no longer shrunk by an hourly/daily remaining-quota calculation.
+2. Range Parser remains single-concurrency sequential. Existing per-run validation stays 1–20 IPA and schedule interval validation stays 5–1440 minutes.
+3. Range usage remains fully metered. `openlist-range-usage.json` continues to retain parse attempts, success/failure, Range request count and real bytes read; the data is now telemetry only, not a quota gate.
+4. The admin Range summary now shows plain totals: `本小时`, `今日`, `今日 Range 请求`, `今日真实读取`. `/10`, `/150`, “剩余额度” and “预算拦截” are removed.
+5. Schedule save/sync copy no longer claims a 10/hour or 150/day protection that no longer exists. The recommended default remains 15 minutes / 1 IPA, but saved 5–1440 minute / 1–20 IPA values are authoritative.
+6. Desktop admin navigation is now sticky: the left menu stays visible while long pages scroll. It uses a full-viewport sidebar with its own overflow when needed.
+7. The mobile admin navigation remains the existing fixed bottom menu; mobile CSS explicitly resets desktop sticky properties.
+8. 1230 replica preview persistence and the independent 30-minute per-drive snapshot cache are preserved unchanged.
 
-1. The Range Parser summary showed `NaN` for “本小时 / 今日 / 今日真实读取” even though the backend counters and remaining quota were numeric. Root cause: the shared numeric `Card` component always calls `Number(v)`, but the Range panel passed formatted strings such as `4/10` and `0.5 MB`. 1230 uses a text-preserving stat card for formatted Range values.
-2. The scheduler UI looked configurable, but `effectiveSchedule()` hard-clamped runtime execution to at least 15 minutes and exactly 1 IPA per run. 1230 removes that hidden hard-fix: saved values in the existing supported range `5..1440 minutes` and `1..20 IPA/run` are honored. The rolling 10/hour and 150/day Range budgets remain authoritative and parsing remains sequential.
-3. The 1229 replica reconciliation result appeared to have lost caching/persistence. Root cause: `replicaPreviewStore.normalize()` wrote schema v2 data but dropped `replicaSchemaVersion`; after re-reading the JSON, `previewCompatible()` always rejected the saved preview. 1230 persists `replicaSchemaVersion`, restoring page-navigation/server-reload reconciliation cache behavior.
+## Why the Range cap was removed
 
-## 1229 functionality preserved
-
-Replica integrity states (`verified`, `missing`, `md5_mismatch`, `size_mismatch`, `unverified`), source-priority sync planning, `source -> target` preview, stale-plan SHA-256 protection, target-specific planning, 30-minute per-drive directory snapshots, targeted refresh, Range request/byte telemetry, MD5 metadata reuse and Alias guidance are unchanged.
-
-## Production observation that led to the hotfix
-
-One real 1229 metadata run reported 7260 database references, 7087 unique IPA paths, 114 missing IPA, 6851 remaining to parse, and one successful parser job using 3 Range requests / about 0.5 MB. The same page showed numeric remaining quota but `NaN` in formatted Range summary cards, confirming the problem was presentation rather than the backend budget counters.
+Production observation showed typical parses using about 2 Range requests and less than 1 MiB of real read traffic per IPA. Under that observed profile, the old attempt-count caps were more conservative than necessary and also made administrator-defined scheduling misleading. 1231 therefore keeps the low-risk controls that map directly to load—single concurrency, per-run maximum, measured requests/bytes—while removing the fixed hourly/daily attempt quota.
 
 ## CI verification
 
-Actions #150 / run `34847017796` passed:
+Actions #156 / run `34852734004` passed:
 - Integration tests
+- Range telemetry-only contracts
 - scheduler configuration contracts
-- Range telemetry/UI contracts
-- replica preview persistence/schema contracts
+- admin sticky-sidebar contract
 - Production build
 - Native API smoke
 - Native frontend static smoke
@@ -43,17 +40,16 @@ Actions #150 / run `34847017796` passed:
 - Legacy Docker compose syntax
 - deployment package build/validation/artifact upload
 
-`release-e2e` remains skipped by workflow condition, so real BaoTa/OpenList 1230 behavior still needs the short recheck below.
+`release-e2e` remains skipped by workflow condition. A final CI run after the 2026091231 version/docs commit is still required before declaring the release package final.
 
 ## Recommended real recheck
 
-After upgrading to 2026091230:
+After upgrading to 2026091231:
 
-1. Open the metadata page and confirm Range usage shows values such as `4/10`, `14/150`, request count and MB instead of `NaN`.
-2. Save a non-default scheduler value, for example `10 minutes / 2 IPA`. Reload the page and confirm the same values are returned. Execution can be lower only when the 10/hour or 150/day budget has insufficient remaining quota.
-3. In cloud replica management, run one reconciliation. Navigate to another admin page and back; the reconciliation list must restore immediately from `openlist-replica-preview.json`.
-4. Re-run “对账（优先快照）” within 30 minutes and confirm it reports snapshot hits rather than re-scanning every physical drive.
-
-Important upgrade detail: preview JSON files produced by buggy 1229 lack `replicaSchemaVersion`, so 1230 intentionally cannot trust that one old preview. Run one fresh reconciliation after upgrade. Existing valid 30-minute per-drive directory snapshots are separate and can still be reused, so this should not require an unnecessary full cloud rescan if those snapshots are fresh.
+1. Save a non-default schedule such as `5 minutes / 5 IPA`, reload the page, and confirm the same values return without a server error.
+2. Confirm Range usage shows plain totals such as `本小时 9` and `今日 22`; there must be no `/10`, `/150` or remaining-quota row.
+3. Trigger a manual/scheduled parse when the historical hour/day counts are already above the former limits and confirm parsing still follows the requested per-run count (subject only to available eligible IPA and the 1–20 per-run validation).
+4. Scroll a long desktop admin page and confirm the left navigation remains visible. On mobile, confirm the bottom navigation still behaves as before.
+5. Recheck the 1230 replica cache fix: reconcile once, navigate away/back, then run “对账（优先快照）” inside 30 minutes and confirm persisted preview/snapshot reuse.
 
 Real Alias distribution, cross-storage copy completion, mismatch remediation and controlled MySQL `bt1a` migration remain separate production-verification items.

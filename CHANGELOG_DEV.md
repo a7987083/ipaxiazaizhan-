@@ -1,5 +1,19 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091231 Range quota removal + sticky admin navigation
+
+- 根据真实运行观察，移除 Range Parser 固定的“每小时 10 个 / 每日 150 个解析尝试”硬预算。元数据同步不再读取小时/每日剩余额度来缩小本轮 `parseLimit`，管理员保存的每轮数量现在直接作为本轮上限。
+- `openlist-range-usage.json` 继续保留解析尝试、成功/失败、真实 Range 请求次数和读取字节，但这些数据从“预算门禁”改为纯观测指标；后端不再返回 `limits` / `remaining` 配额字段。
+- 定时解析仍保持 5–1440 分钟、每轮 1–20 个的现有输入校验，Parser 仍为单并发串行。1231 取消的是额外的小时/每日全局尝试上限，不是单轮输入保护。
+- 后台 Range Parser 用量改成纯总数展示：`本小时`、`今日`、`今日 Range 请求`、`今日真实读取`。移除 `/10`、`/150`、`剩余额度` 和任务进度中的 `预算拦截`。
+- 定时设置保存提示和手动解析确认文案同步去掉 10/150 预算说明，避免后台文案继续暗示不存在的限制。
+- 桌面后台左侧菜单改为 sticky：`position: sticky; top: 0; height: 100vh; overflow-y: auto`，长页面滚动时菜单始终可见；菜单项目超过一屏时左栏自身可滚动。
+- 移动端保持原有底部 fixed 导航，并显式重置 `top/height/overflow/align-self`，避免桌面 sticky 样式影响手机布局。
+- 1230 的 Replica Preview schema 持久化修复和独立 30 分钟实体网盘目录快照策略保持不变。
+- Contract tests 新增：Range 用量必须为纯 telemetry、小时/每日不再包含 remaining/limits、核心同步不存在 budget gating、后台不得出现 `/10`/`/150`/剩余额度/预算拦截、桌面 sidebar sticky 与移动端 fixed 导航样式同时存在。
+- Functional Actions #156 / run `34852734004`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、Legacy Docker compose syntax、部署包构建/校验和 Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
+- 真实 BaoTa 1231 仍待回归：保存非默认定时设置、在历史计数超过旧阈值时确认仍可继续解析、Range 卡片显示纯总数、桌面长页面滚动时左侧菜单持续可见，并复测 1230 的副本对账持久化/快照命中。
+
 ## 2026-09-14 — 2026091230 Production hotfix: Range UI + configurable scheduler + replica cache restore
 
 - 修复 Range Parser 用量卡片显示 `NaN`。根因不是后端计数错误，而是通用 `Card` 组件把 `4/10`、`14/150`、`0.5 MB` 这类已经格式化的字符串再次 `Number(...)`，结果变成 `NaN`。1230 对格式化指标改用文本型统计卡，真实请求数/读取量继续来自原有后端计量。
@@ -110,7 +124,7 @@
 - 新增管理员专用 `/api/v1/admin/openlist/results-rich`；通过 Admin Auth + CSRF 保护，返回当前页解析结果及当前数据库下载地址。
 - 新增 contract tests 覆盖动态规则、旧配置迁移、下载链接 → `bt1a`、管理员下载地址接口、Build 明示、可新增映射规则等。
 - Actions #78 首次失败：唯一原因是 1223 的旧 UI contract 仍要求旧“当前映射字段”文案；1224 的新功能/新 contract 当轮均已通过。随后按动态规则新语义更新该契约。
-- Actions #79 / run `34784361324`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、部署包构建/校验/Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
+- Actions #79 / run `34784361324`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、部署包构建/校验和 Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
 - 真实 BaoTa 2026091224 部署和真实 MySQL 写入仍待验证。
 
 ## 2026-09-14 — 2026091223 Write-back preview visibility hotfix
