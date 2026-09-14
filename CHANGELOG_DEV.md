@@ -1,5 +1,19 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091230 Production hotfix: Range UI + configurable scheduler + replica cache restore
+
+- 修复 Range Parser 用量卡片显示 `NaN`。根因不是后端计数错误，而是通用 `Card` 组件把 `4/10`、`14/150`、`0.5 MB` 这类已经格式化的字符串再次 `Number(...)`，结果变成 `NaN`。1230 对格式化指标改用文本型统计卡，真实请求数/读取量继续来自原有后端计量。
+- 真实 1229 运行样本确认 Range Parser 本身工作正常：一次成功解析使用 3 次 Range 请求、约 0.5 MB；同时后台读取到 7260 个数据库引用、7087 个唯一 IPA、114 个缺失条目，任务结束后待解析 6851 个。该样本说明此次 `NaN` 是显示层缺陷，不是预算或解析器失效。
+- 修复“定时解析看起来可配置、实际却固定为 15 分钟 / 1 个”的问题。根因是 `effectiveSchedule()` 在运行时硬编码 `intervalMinutes >= 15` 且 `parseLimit = 1`，覆盖了已经保存的配置。
+- 1230 运行时真正采用后台保存值：间隔支持 5–1440 分钟、每轮支持 1–20 个 IPA。推荐默认仍是 15 分钟 / 1 个，但不再强制固定。
+- 调度可配置不等于取消保护：Range Parser 仍为串行单并发，滚动 1 小时最多 10 个解析尝试、UTC 当天最多 150 个；如果当前剩余额度低于“每轮数量”，本轮自动按剩余额度收缩。
+- 修复“云盘副本管理对账结果/页面切换后像是没有缓存”的问题。根因是 1229 的 `replicaPreviewStore.normalize()` 在落盘/读回时丢掉 `replicaSchemaVersion`，而 `previewCompatible()` 又要求 schema >= 2，因此所有已经持久化的 1229 对账结果读回来都会被判为不兼容。
+- `openlist-replica-preview.json` 现在会保留 `replicaSchemaVersion`，新生成的 schema-v2 对账结果可再次在页面切换、浏览器刷新和 Node 服务重启后恢复。
+- 1229 已经生成、但缺少 `replicaSchemaVersion` 的旧 preview 文件仍会被 1230 安全拒绝；升级后需要重新对账一次。独立的 30 分钟实体网盘目录快照 `openlist-replica-snapshots.json` 不受此字段问题影响，仍可复用，因此 fresh snapshot 场景不需要重新全量扫云盘。
+- 新增/调整 contract tests，覆盖可配置 scheduler、Range 格式化统计卡、Replica Preview schema 持久化和既有 30 分钟快照策略。
+- Actions #150 / run `34847017796`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、Legacy Docker compose syntax、部署包构建/校验和 Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
+- 真实 BaoTa 1230 仍需做三个短回归：Range 卡片不再 NaN；保存一个非默认定时配置并刷新页面确认保持；云盘副本完成一次对账后切换页面再回来确认结果立即恢复，并在 30 分钟内再次对账确认快照命中。
+
 ## 2026-09-14 — 2026091229 Replica integrity + sync plan + source priority
 
 - 多网盘对账新增副本完整性状态：`verified`、`missing`、`md5_mismatch`、`size_mismatch`、`unverified`。同路径存在不再自动视为健康副本。
@@ -59,7 +73,7 @@
 - 服务启动时先将当前仍有效的 v3 解析结果迁移进 MD5 库，再启动 OpenList 定时器，避免升级后第一次同步先覆盖旧结果。
 - 当前文件在新账号/新路径下只要 MD5 相同且已知大小不冲突，就可从持久库恢复旧解析结果；真正不同 MD5 不复用。
 - stale `parsedMd5`、解析失败和缺失文件不会进入持久 MD5 库。
-- OpenList 目录缓存现在在服务启动时主动失效一次，并在 OpenList 配置更新时间变化时再次失效，防止同一 OpenList 地址更换 Token/账号后继续读取旧账号的目录缓存。
+- OpenList 目录缓存现在在服务启动时主动失效一次，并在 OpenList 配置更新时间变化时再次失效，防止同一 OpenList 地址更换 Token/账号后继续读取旧账号目录缓存。
 - 后台“本地缓存”新增 `MD5 解析库` 数量和体积；“清空 IPA 解析缓存/全部缓存”明确同时清空活动路径缓存和持久 MD5 解析库，但不会删除云盘 IPA 或 MySQL 数据。
 - 新增 account-switch contract tests：v3 → MD5 迁移、同 IPA 新账号/新路径复用、不同 MD5 拒绝、相同 MD5 但大小冲突拒绝、stale/failed 不迁移，以及启动顺序/目录缓存失效契约。
 - Actions #103 / run `34787233314`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、部署包构建/校验/Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
