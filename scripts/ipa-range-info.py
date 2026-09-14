@@ -10,6 +10,7 @@ import zipfile
 BLOCK = 256 * 1024
 MAX_FETCH = 16 * 1024 * 1024
 TIMEOUT = 20
+LAST_METRICS = {'range_bytes': 0, 'range_requests': 0}
 
 class HttpRangeFile(io.RawIOBase):
     def __init__(self, url, size):
@@ -18,6 +19,7 @@ class HttpRangeFile(io.RawIOBase):
         self.pos = 0
         self.cache = {}
         self.fetched = 0
+        self.requests = 0
 
     def readable(self):
         return True
@@ -53,16 +55,19 @@ class HttpRangeFile(io.RawIOBase):
             self.url,
             headers={
                 'Range': f'bytes={start}-{end}',
-                'User-Agent': 'zonoe-ipa-range-parser/1.0',
+                'User-Agent': 'zonoe-ipa-range-parser/1.1',
                 'Accept-Encoding': 'identity',
             },
         )
+        self.requests += 1
+        LAST_METRICS['range_requests'] = self.requests
         with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
             status = getattr(res, 'status', None) or res.getcode()
             if status != 206:
                 raise RuntimeError(f'远端不支持 HTTP Range (HTTP {status})')
             data = res.read(end - start + 1)
         self.fetched += len(data)
+        LAST_METRICS['range_bytes'] = self.fetched
         self.cache[index] = data
         return data
 
@@ -122,6 +127,7 @@ def main():
         'minimum_ios': clean(plist.get('MinimumOSVersion')),
         'executable': clean(plist.get('CFBundleExecutable')),
         'range_bytes': remote.fetched,
+        'range_requests': remote.requests,
     }
     print(json.dumps(result, ensure_ascii=False, separators=(',', ':')))
 
@@ -130,5 +136,10 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as e:
-        print(json.dumps({'ok': False, 'error': str(e)[:500]}, ensure_ascii=False, separators=(',', ':')))
+        print(json.dumps({
+            'ok': False,
+            'error': str(e)[:500],
+            'range_bytes': int(LAST_METRICS.get('range_bytes') or 0),
+            'range_requests': int(LAST_METRICS.get('range_requests') or 0),
+        }, ensure_ascii=False, separators=(',', ':')))
         sys.exit(1)
