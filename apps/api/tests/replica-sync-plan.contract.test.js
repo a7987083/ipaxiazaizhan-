@@ -10,10 +10,10 @@ const mounts=replica.mounts.map(x=>({...x,error:null,renameSuggestions:[]}));
 
 describe('replica sync planning',()=>{
   test('verified source outranks higher-priority unverified source',()=>{
-    const preview={generatedAt:'2026-09-14T00:00:00Z',mounts,rows:[{relativePath:'A.ipa',copies:{1:true,2:true,3:false},copyStatus:{1:'unverified',2:'verified',3:'missing'}}]};
+    const preview={generatedAt:'2026-09-14T00:00:00Z',mounts,rows:[{relativePath:'A.ipa',md5:'A'.repeat(32),size:100,copies:{1:true,2:true,3:false},copyStatus:{1:'unverified',2:'verified',3:'missing'}}]};
     const plan=buildReplicaSyncPlan(preview,replica,{limit:20,targetStorageIds:[3]});
     expect(plan.actions).toHaveLength(1);
-    expect(plan.actions[0]).toMatchObject({sourceStorageId:2,targetStorageId:3,sourceStatus:'verified'});
+    expect(plan.actions[0]).toMatchObject({sourceStorageId:2,targetStorageId:3,sourceStatus:'verified',expectedMd5:'A'.repeat(32),expectedSize:100,targetRootPath:'/123/app'});
     expect(plan.summary.verifiedSourceActions).toBe(1);
   });
 
@@ -33,8 +33,8 @@ describe('replica sync planning',()=>{
 
   test('plan hash is deterministic and target filter is respected',()=>{
     const preview={generatedAt:'2026-09-14T00:00:00Z',mounts,rows:[
-      {relativePath:'D.ipa',copies:{1:true,2:false,3:false},copyStatus:{1:'verified',2:'missing',3:'missing'}},
-      {relativePath:'E.ipa',copies:{1:true,2:false,3:false},copyStatus:{1:'verified',2:'missing',3:'missing'}}
+      {relativePath:'D.ipa',md5:'D'.repeat(32),size:10,copies:{1:true,2:false,3:false},copyStatus:{1:'verified',2:'missing',3:'missing'}},
+      {relativePath:'E.ipa',md5:'E'.repeat(32),size:20,copies:{1:true,2:false,3:false},copyStatus:{1:'verified',2:'missing',3:'missing'}}
     ]};
     const a=buildReplicaSyncPlan(preview,replica,{limit:20,targetStorageIds:[2]});
     const b=buildReplicaSyncPlan(preview,replica,{limit:20,targetStorageIds:[2]});
@@ -42,5 +42,13 @@ describe('replica sync planning',()=>{
     expect(a.actions.every(x=>x.targetStorageId===2)).toBe(true);
     expect(a.planHash).toMatch(/^[a-f0-9]{64}$/);
     expect(a.planHash).toBe(b.planHash);
+  });
+
+  test('plan hash changes when expected content changes even if source and target stay the same',()=>{
+    const base={generatedAt:'2026-09-14T00:00:00Z',mounts,rows:[{relativePath:'F.ipa',md5:'1'.repeat(32),size:100,copies:{1:true,2:false,3:false},copyStatus:{1:'verified',2:'missing',3:'missing'}}]};
+    const changed={...base,rows:[{...base.rows[0],md5:'2'.repeat(32)}]};
+    const a=buildReplicaSyncPlan(base,replica,{limit:20,targetStorageIds:[2]});
+    const b=buildReplicaSyncPlan(changed,replica,{limit:20,targetStorageIds:[2]});
+    expect(a.planHash).not.toBe(b.planHash);
   });
 });
