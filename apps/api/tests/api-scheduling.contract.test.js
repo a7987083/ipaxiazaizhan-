@@ -63,7 +63,7 @@ describe('OpenList API scheduling and cache contract',()=>{
     expect(service).not.toContain('1000);');
   });
 
-  test('admin UI exposes cache diagnostics and safe Range controls',()=>{
+  test('admin UI exposes cache diagnostics, formatted Range usage and configurable schedule',()=>{
     const replica=read('apps/web/src/pages/AdminReplicaPanel.jsx');
     const metadata=read('apps/web/src/pages/AdminOpenListPanel.jsx');
     expect(replica).toContain('只刷新这个盘');
@@ -71,6 +71,10 @@ describe('OpenList API scheduling and cache contract',()=>{
     expect(replica).toContain('预览补齐此盘（20 个）');
     expect(replica).toContain('补齐计划预览');
     expect(metadata).toContain('Range Parser 用量');
+    expect(metadata).toContain('function TextCard');
+    expect(metadata).toContain('<TextCard t="本小时"');
+    expect(metadata).toContain('min="5" max="1440"');
+    expect(metadata).toContain('min="1" max="20"');
     expect(metadata).toContain('后台扫描 MD5（使用缓存）');
     expect(metadata).toContain('后台解析 1 个');
   });
