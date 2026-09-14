@@ -68,7 +68,8 @@ describe('OpenList API scheduling and cache contract',()=>{
     const metadata=read('apps/web/src/pages/AdminOpenListPanel.jsx');
     expect(replica).toContain('只刷新这个盘');
     expect(replica).toContain('快照命中 / 实扫');
-    expect(replica).toContain('补齐此盘缺失（20 个）');
+    expect(replica).toContain('预览补齐此盘（20 个）');
+    expect(replica).toContain('补齐计划预览');
     expect(metadata).toContain('Range Parser 用量');
     expect(metadata).toContain('后台扫描 MD5（使用缓存）');
     expect(metadata).toContain('后台解析 1 个');
