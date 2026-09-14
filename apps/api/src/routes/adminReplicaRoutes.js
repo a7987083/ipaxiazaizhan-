@@ -28,7 +28,10 @@ const configSchema=z.object({
 
 r.get('/openlist/replicas',asyncHandler(async(_req,res)=>{try{ok(res,await getReplicaManagerState())}catch(e){throw mapError(e)}}));
 r.put('/openlist/replicas',asyncHandler(async(req,res)=>{try{ok(res,await saveReplicaManagerConfig(configSchema.parse(req.body||{})))}catch(e){throw mapError(e)}}));
-r.post('/openlist/replicas/preview',asyncHandler(async(_req,res)=>{try{ok(res,await previewReplicas())}catch(e){throw mapError(e)}}));
+r.post('/openlist/replicas/preview',asyncHandler(async(req,res)=>{
+  const p=z.object({forceRefresh:z.boolean().optional().default(false),storageIds:z.array(z.coerce.number().int().positive()).max(50).optional().default([])}).parse(req.body||{});
+  try{ok(res,await previewReplicas(p))}catch(e){throw mapError(e)}
+}));
 r.post('/openlist/replicas/sync',asyncHandler(async(req,res)=>{
   const p=z.object({limit:z.coerce.number().int().min(1).max(50).default(20),targetStorageIds:z.array(z.coerce.number().int().positive()).max(50).optional().default([])}).parse(req.body||{});
   try{ok(res,await syncMissingReplicas(p))}catch(e){throw mapError(e)}
