@@ -2,35 +2,37 @@
 
 - Repo: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
-- Candidate: `2026091229`
-- Baseline: `2026091228` / `53c925fb74508da32ba97d1f530d9d3405d5883b`
-- Functional code: `4bc2dcd0e9fe8adedb25aea0f0e4d82eac885adf`
-- Contract fix: `6534f1529bb298c56e7c30fe425e28064879a5d1`
-- Functional CI: Actions #142 / run `34838613229` passed validation and package jobs.
-- Real BaoTa/OpenList 1229 verification: pending.
+- Candidate: `2026091230`
+- Baseline: `2026091229` / `f0494e2a57108abe99fcd8dd45e01d9b8715b8cb`
+- Replica preview cache fix: `d6057508b4e8c7bc5dd2eabf3e5743ae00264ef3`
+- Configurable scheduler fix: `0c09e9be12f6ce3606cc523ca5bbb0929f36df51`
+- Range UI fix: `4e9fc191582fcf369b786bef1729ea56acc6d9d5`
+- Final hotfix CI: Actions #150 / run `34847017796` passed validation and package jobs.
+- Real BaoTa/OpenList 1230 recheck: pending.
 
-## What 1229 changes
+## Why 1230 exists
 
-1. Replica reconciliation no longer treats “same path exists” as automatically healthy. Every expected IPA now gets one of five states per drive: `verified`, `missing`, `md5_mismatch`, `size_mismatch`, or `unverified`.
-2. `verified` requires matching MD5 when an expected MD5 is known, with known-size compatibility. If the expected/actual hash is unavailable, the copy remains `unverified` rather than being silently called normal.
-3. MD5/size mismatches are shown separately in the admin UI and are never used as automatic copy sources. They are also not automatically overwritten by the missing-copy flow.
-4. The persisted reconciliation schema is bumped to v2. An old 1228 preview is intentionally ignored by the manager until a fresh 1229 reconciliation is produced; existing per-drive directory snapshots remain reusable.
-5. Copy is now a two-step operation. `POST /openlist/replicas/sync-plan` generates a read-only plan, including every `IPA: source drive -> target drive` action. Nothing is copied until the admin explicitly confirms the plan.
-6. Each plan has a SHA-256 `planHash`. Execution recomputes the plan from the current reconciliation/config and rejects a stale plan with `REPLICA_PLAN_CHANGED` if source/target choices changed.
-7. Source priority is persisted using the order of selected physical mounts in `openlist-replicas.json`. The admin UI can move drives up/down. Within the same integrity class, earlier drives are preferred.
-8. Safety overrides preference: a verified source always outranks an unverified source, even if the unverified drive is higher in the configured order. MD5/size mismatch copies are never eligible sources.
-9. Per-target planning remains supported, so an admin can preview/execute only the missing copies for one writable drive.
-10. 1228 request throttling, 30-minute per-drive snapshots, target-only snapshot invalidation, Range budgets/telemetry, MD5 metadata reuse, Alias UX and quarantine behavior remain unchanged.
+Real 1229 runtime testing exposed three concrete regressions/defects:
+
+1. The Range Parser summary showed `NaN` for “本小时 / 今日 / 今日真实读取” even though the backend counters and remaining quota were numeric. Root cause: the shared numeric `Card` component always calls `Number(v)`, but the Range panel passed formatted strings such as `4/10` and `0.5 MB`. 1230 uses a text-preserving stat card for formatted Range values.
+2. The scheduler UI looked configurable, but `effectiveSchedule()` hard-clamped runtime execution to at least 15 minutes and exactly 1 IPA per run. 1230 removes that hidden hard-fix: saved values in the existing supported range `5..1440 minutes` and `1..20 IPA/run` are honored. The rolling 10/hour and 150/day Range budgets remain authoritative and parsing remains sequential.
+3. The 1229 replica reconciliation result appeared to have lost caching/persistence. Root cause: `replicaPreviewStore.normalize()` wrote schema v2 data but dropped `replicaSchemaVersion`; after re-reading the JSON, `previewCompatible()` always rejected the saved preview. 1230 persists `replicaSchemaVersion`, restoring page-navigation/server-reload reconciliation cache behavior.
+
+## 1229 functionality preserved
+
+Replica integrity states (`verified`, `missing`, `md5_mismatch`, `size_mismatch`, `unverified`), source-priority sync planning, `source -> target` preview, stale-plan SHA-256 protection, target-specific planning, 30-minute per-drive directory snapshots, targeted refresh, Range request/byte telemetry, MD5 metadata reuse and Alias guidance are unchanged.
+
+## Production observation that led to the hotfix
+
+One real 1229 metadata run reported 7260 database references, 7087 unique IPA paths, 114 missing IPA, 6851 remaining to parse, and one successful parser job using 3 Range requests / about 0.5 MB. The same page showed numeric remaining quota but `NaN` in formatted Range summary cards, confirming the problem was presentation rather than the backend budget counters.
 
 ## CI verification
 
-Actions #141 first failed only because one 1228 UI contract still required the old button text `补齐此盘缺失（20 个）`; all new integrity/sync-plan tests passed in that run. The stale contract was updated to the new plan-first wording without changing business logic.
-
-Actions #142 / run `34838613229` then passed:
+Actions #150 / run `34847017796` passed:
 - Integration tests
-- replica integrity contracts
-- sync-plan/source-priority contracts
-- replica admin UX contracts
+- scheduler configuration contracts
+- Range telemetry/UI contracts
+- replica preview persistence/schema contracts
 - Production build
 - Native API smoke
 - Native frontend static smoke
@@ -41,10 +43,17 @@ Actions #142 / run `34838613229` then passed:
 - Legacy Docker compose syntax
 - deployment package build/validation/artifact upload
 
-`release-e2e` remains skipped by workflow condition, so real BaoTa/OpenList behavior is not claimed as verified.
+`release-e2e` remains skipped by workflow condition, so real BaoTa/OpenList 1230 behavior still needs the short recheck below.
 
-## Recommended real validation
+## Recommended real recheck
 
-Deploy 2026091229 and run one forced reconciliation. Confirm each drive shows separate counts for verified/unverified/integrity-error/missing/extra. Pick one known IPA with MD5 and compare at least two drives. Then use “预览补齐计划（20 个）” and confirm the UI shows exactly which drive supplies each target. Change drive priority, save, reconcile, and verify same-integrity sources follow the new order. Do not intentionally corrupt production files merely to test mismatch handling; use a known existing mismatch or a disposable test path if needed.
+After upgrading to 2026091230:
 
-The 1228 API scheduling/Range hardening remains active. Real Alias distribution, account-switch, cross-storage copy/rename/quarantine and dynamic MySQL write-back still remain separate production-verification items unless already tested.
+1. Open the metadata page and confirm Range usage shows values such as `4/10`, `14/150`, request count and MB instead of `NaN`.
+2. Save a non-default scheduler value, for example `10 minutes / 2 IPA`. Reload the page and confirm the same values are returned. Execution can be lower only when the 10/hour or 150/day budget has insufficient remaining quota.
+3. In cloud replica management, run one reconciliation. Navigate to another admin page and back; the reconciliation list must restore immediately from `openlist-replica-preview.json`.
+4. Re-run “对账（优先快照）” within 30 minutes and confirm it reports snapshot hits rather than re-scanning every physical drive.
+
+Important upgrade detail: preview JSON files produced by buggy 1229 lack `replicaSchemaVersion`, so 1230 intentionally cannot trust that one old preview. Run one fresh reconciliation after upgrade. Existing valid 30-minute per-drive directory snapshots are separate and can still be reused, so this should not require an unnecessary full cloud rescan if those snapshots are fresh.
+
+Real Alias distribution, cross-storage copy completion, mismatch remediation and controlled MySQL `bt1a` migration remain separate production-verification items.
