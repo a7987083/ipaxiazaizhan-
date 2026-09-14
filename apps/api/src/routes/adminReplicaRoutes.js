@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { requireAdmin,requireCsrf } from '../middleware/auth.js';
 import { asyncHandler,ok,AppError } from '../utils/http.js';
 import {
-  getReplicaManagerState,saveReplicaManagerConfig,previewReplicas,previewReplicaSyncPlan,syncMissingReplicas,previewReplicaRepairPlan,repairIntegrityReplicas,renameReplicaSuggestion,quarantineReplicaExtras,
+  getReplicaManagerState,saveReplicaManagerConfig,previewReplicas,previewReplicaSyncPlan,syncMissingReplicas,renameReplicaSuggestion,quarantineReplicaExtras,
   getReplicaOperations,verifyReplicaOperationsNow
 } from '../services/openListReplicaService.js';
+import {previewReplicaRepairPlan,repairIntegrityReplicas} from '../services/replicaRepairService.js';
 
 const r=Router();
 r.use(requireAdmin,requireCsrf);
