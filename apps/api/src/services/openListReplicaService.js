@@ -1,10 +1,14 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { listMysqlSources,getOpenListConfig,readOpenListIpaCache,readOpenListReplicaConfig,writeOpenListReplicaConfig } from '../storage/controlStore.js';
 import { fromHex,parseTsv,runMysql,safeIdentifier } from './mysqlCli.js';
 import { publicUrlToApiPath } from './openListMetadataService.js';
 import { readReplicaPreview,writeReplicaPreview,clearReplicaPreview } from './replicaPreviewStore.js';
+import {
+  REPLICA_SNAPSHOT_TTL_MS,clearReplicaSnapshots,invalidateReplicaSnapshots,
+  readReplicaSnapshots,snapshotFresh,snapshotKey,writeReplicaSnapshots
+} from './replicaSnapshotStore.js';
 
-const PAGE_SIZE=500;
 const MAX_SCAN_FILES=20000;
 const MAX_SCAN_DIRS=1000;
 
@@ -32,14 +36,19 @@ function md5Of(item){
 }
 function numeric(v){const n=Number(String(v??'').trim());return Number.isFinite(n)&&n>=0?Math.round(n):null}
 function err(code,message,details){return Object.assign(new Error(message),{code,details})}
+function fingerprint(v){return createHash('sha256').update(String(v||'')).digest('hex').slice(0,16)}
+function replicaScopeKey(config){return `${String(config.url||'').replace(/\/+$/,'')}|${fingerprint(config.token)}`}
+function previewFresh(p){const t=Date.parse(String(p?.generatedAt||''));return Number.isFinite(t)&&Date.now()-t<REPLICA_SNAPSHOT_TTL_MS}
+function makeMetrics(){return {openListRequests:0,fsListRequests:0,storageListRequests:0,fileOperationRequests:0,snapshotHits:0,remoteMountScans:0}}
 
-async function openListRequest(config,apiPath,{method='POST',body,query,timeoutMs=30000}={}){
+async function openListRequest(config,apiPath,{method='POST',body,query,timeoutMs=30000,metrics}={}){
+  if(metrics){metrics.openListRequests+=1;if(apiPath==='/api/fs/list')metrics.fsListRequests+=1;else if(apiPath==='/api/admin/storage/list')metrics.storageListRequests+=1;else if(apiPath.startsWith('/api/fs/'))metrics.fileOperationRequests+=1}
   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
     const base=String(config.url||'').replace(/\/+$/,'');
     const u=new URL(`${base}${apiPath}`);
     for(const [k,v] of Object.entries(query||{}))if(v!==undefined&&v!==null)u.searchParams.set(k,String(v));
-    const options={method,headers:{Authorization:config.token,'User-Agent':'zonoe-openlist-replica/1.0'},signal:controller.signal};
+    const options={method,headers:{Authorization:config.token,'User-Agent':'zonoe-openlist-replica/1.1'},signal:controller.signal};
     if(body!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body)}
     const res=await fetch(u,options);const json=await res.json().catch(()=>null);
     if(!res.ok||!json||json.code!==200)throw err('OPENLIST_API_FAILED',json?.message||`OpenList HTTP ${res.status}`,{status:res.status,apiPath});
@@ -47,32 +56,27 @@ async function openListRequest(config,apiPath,{method='POST',body,query,timeoutM
   }finally{clearTimeout(timer)}
 }
 
-export async function listOpenListStorages(config){
-  const data=await openListRequest(config,'/api/admin/storage/list',{method:'GET',query:{page:1,per_page:500}});
+export async function listOpenListStorages(config,metrics){
+  const data=await openListRequest(config,'/api/admin/storage/list',{method:'GET',query:{page:1,per_page:500},metrics});
   return (Array.isArray(data?.content)?data.content:[]).map(x=>({
     id:Number(x.id),mountPath:cleanPath(x.mount_path||'/'),driver:String(x.driver||''),status:String(x.status||''),disabled:x.disabled===true,remark:String(x.remark||''),modified:x.modified||null,
     _addition:x.addition
   }));
 }
 
-async function listIpaTree(config,rootPath){
+async function listIpaTree(config,rootPath,metrics){
   rootPath=cleanPath(rootPath);const queue=[rootPath],files={};let dirs=0,seen=0;
   while(queue.length){
     const dir=queue.shift();dirs+=1;if(dirs>MAX_SCAN_DIRS)throw err('REPLICA_SCAN_LIMIT','目录数量过多，已停止扫描');
-    let pageNo=1,total=0,pageSeen=0;
-    while(true){
-      const data=await openListRequest(config,'/api/fs/list',{body:{path:dir,password:'',page:pageNo,per_page:PAGE_SIZE,refresh:false}});
-      const content=Array.isArray(data?.content)?data.content:[];total=Number(data?.total||content.length||0);pageSeen+=content.length;
-      for(const item of content){
-        const full=joinPath(dir,String(item?.name||''));
-        if(item?.is_dir){queue.push(full);continue}
-        if(!String(item?.name||'').toLowerCase().endsWith('.ipa'))continue;
-        const relative=relPath(rootPath,full);if(relative===null)continue;
-        files[relative]={relativePath:relative,name:String(item?.name||''),fullPath:full,size:Number(item?.size||0),modified:String(item?.modified||''),md5:md5Of(item)};
-        seen+=1;if(seen>MAX_SCAN_FILES)throw err('REPLICA_SCAN_LIMIT','IPA 数量超过安全扫描上限');
-      }
-      if(content.length===0||pageSeen>=total)break;
-      pageNo+=1;if(pageNo>1000)throw err('REPLICA_SCAN_LIMIT','OpenList 分页数量异常');
+    const data=await openListRequest(config,'/api/fs/list',{body:{path:dir,password:'',page:1,per_page:0,refresh:false},metrics});
+    const content=Array.isArray(data?.content)?data.content:[];
+    for(const item of content){
+      const full=joinPath(dir,String(item?.name||''));
+      if(item?.is_dir){queue.push(full);continue}
+      if(!String(item?.name||'').toLowerCase().endsWith('.ipa'))continue;
+      const relative=relPath(rootPath,full);if(relative===null)continue;
+      files[relative]={relativePath:relative,name:String(item?.name||''),fullPath:full,size:Number(item?.size||0),modified:String(item?.modified||''),md5:md5Of(item)};
+      seen+=1;if(seen>MAX_SCAN_FILES)throw err('REPLICA_SCAN_LIMIT','IPA 数量超过安全扫描上限');
     }
   }
   return files;
@@ -112,7 +116,7 @@ export function buildReplicaDiff(expectedItems,mountSnapshots){
     const extraByMd5=new Map();for(const x of extra)if(x.md5){if(!extraByMd5.has(x.md5))extraByMd5.set(x.md5,[]);extraByMd5.get(x.md5).push(x)}
     const renameSuggestions=[];
     for(const x of missing){if(!x.md5)continue;const candidates=extraByMd5.get(x.md5)||[];const same=candidates.filter(c=>sameDir(c.relativePath,x.relativePath));if(same.length===1)renameSuggestions.push({fromRelative:same[0].relativePath,toRelative:x.relativePath,md5:x.md5})}
-    perMount.push({storageId:snap.storageId,label:snap.label,mountPath:snap.mountPath,rootPath:snap.rootPath,writable:snap.writable,error:snap.error||null,total:Object.keys(actual).length,expected:expected.size,present:expected.size-missing.length,missing,extra,renameSuggestions});
+    perMount.push({storageId:snap.storageId,label:snap.label,mountPath:snap.mountPath,rootPath:snap.rootPath,writable:snap.writable,error:snap.error||null,total:Object.keys(actual).length,expected:expected.size,present:expected.size-missing.length,missing,extra,renameSuggestions,snapshot:snap.snapshot||null});
   }
   for(const item of expected.values()){
     const copies={};for(const snap of mountSnapshots||[])copies[snap.storageId]=Boolean(snap.files?.[item.relativePath]);
@@ -147,13 +151,13 @@ async function context(){
 }
 
 export async function getReplicaManagerState(){
-  const {config,replica}=await context();let storages=[],storageError=null;
-  try{storages=await listOpenListStorages(config)}catch(e){storageError=e?.message||'无法读取 OpenList 存储列表'}
-  return {config:replica,openListUrl:String(config.url||''),storages:storages.map(publicStorage),storageError,alias:storages.length?aliasStatus(storages,replica):null,lastPreview:await readReplicaPreview()};
+  const {config,replica}=await context();let storages=[],storageError=null;const metrics=makeMetrics();
+  try{storages=await listOpenListStorages(config,metrics)}catch(e){storageError=e?.message||'无法读取 OpenList 存储列表'}
+  return {config:replica,openListUrl:String(config.url||''),storages:storages.map(publicStorage),storageError,alias:storages.length?aliasStatus(storages,replica):null,lastPreview:await readReplicaPreview(),apiStats:metrics,snapshotTtlMinutes:30};
 }
 
 export async function saveReplicaManagerConfig(input){
-  const {config}=await context();const storages=await listOpenListStorages(config);const byId=new Map(storages.map(x=>[x.id,x]));
+  const {config}=await context();const metrics=makeMetrics();const storages=await listOpenListStorages(config,metrics);const byId=new Map(storages.map(x=>[x.id,x]));
   const mounts=(Array.isArray(input?.mounts)?input.mounts:[]).map(x=>{
     const storage=byId.get(Number(x.storageId));if(!storage)throw err('REPLICA_CONFIG_INVALID',`OpenList 存储 ${x.storageId} 不存在`);
     if(String(storage.driver).toLowerCase()==='alias')throw err('REPLICA_CONFIG_INVALID',`Alias ${storage.mountPath} 只能用于分流检查，不能作为实体副本盘`);
@@ -162,76 +166,96 @@ export async function saveReplicaManagerConfig(input){
   });
   const ids=mounts.map(x=>x.storageId);if(new Set(ids).size!==ids.length)throw err('REPLICA_CONFIG_INVALID','同一个 OpenList 存储不能重复选择');
   const saved=await writeOpenListReplicaConfig({...input,mounts});
-  await clearReplicaPreview();
+  await clearReplicaPreview();await clearReplicaSnapshots(replicaScopeKey(config));
   return saved;
 }
 
-export async function previewReplicas(){
+export async function previewReplicas({forceRefresh=false,storageIds=[]}={}){
   const {config,replica}=await context();if(!replica.enabled)throw err('REPLICA_DISABLED','云盘副本管理尚未启用');
-  const storages=await listOpenListStorages(config),byId=new Map(storages.map(x=>[x.id,x]));
-  const expected=await readExpected(config);const snapshots=[];
+  const metrics=makeMetrics();const storages=await listOpenListStorages(config,metrics),byId=new Map(storages.map(x=>[x.id,x]));
+  const expected=await readExpected(config);const snapshots=[];const scopeKey=replicaScopeKey(config);const cache=await readReplicaSnapshots(scopeKey);const forceIds=new Set((storageIds||[]).map(Number));let dirty=false;
   for(const mount of replica.mounts.filter(x=>x.enabled!==false)){
     const storage=byId.get(mount.storageId);if(!storage){snapshots.push({...mount,files:{},error:'OpenList 中已找不到此存储'});continue}
     if(storage.disabled){snapshots.push({...mount,label:mount.label||storage.remark||storage.mountPath,files:{},error:'此 OpenList 存储当前已禁用'});continue}
-    try{snapshots.push({...mount,label:mount.label||storage.remark||storage.mountPath,files:await listIpaTree(config,mount.rootPath)})}
-    catch(e){snapshots.push({...mount,label:mount.label||storage.remark||storage.mountPath,files:{},error:e?.message||'扫描失败'})}
+    const key=snapshotKey(mount.storageId,mount.rootPath);const entry=cache.mounts?.[key];const shouldForce=forceRefresh&&(forceIds.size===0||forceIds.has(Number(mount.storageId)));
+    if(!shouldForce&&snapshotFresh(entry)){
+      metrics.snapshotHits+=1;
+      snapshots.push({...mount,label:mount.label||storage.remark||storage.mountPath,files:entry.files||{},snapshot:{cacheHit:true,scannedAt:entry.scannedAt,ageMs:Math.max(0,Date.now()-Date.parse(entry.scannedAt))}});
+      continue;
+    }
+    try{
+      const files=await listIpaTree(config,mount.rootPath,metrics);metrics.remoteMountScans+=1;const scannedAt=new Date().toISOString();
+      cache.mounts[key]={storageId:mount.storageId,rootPath:mount.rootPath,files,scannedAt};dirty=true;
+      snapshots.push({...mount,label:mount.label||storage.remark||storage.mountPath,files,snapshot:{cacheHit:false,scannedAt,ageMs:0}});
+    }
+    catch(e){snapshots.push({...mount,label:mount.label||storage.remark||storage.mountPath,files:{},error:e?.message||'扫描失败',snapshot:{cacheHit:false,scannedAt:null,ageMs:null}})}
   }
+  if(dirty)await writeReplicaSnapshots(cache);
   const diff=buildReplicaDiff(expected.items,snapshots);
-  const result={...diff,generatedAt:new Date().toISOString(),ignoredDatabaseRefs:expected.ignored,sourceErrors:expected.sourceErrors,alias:aliasStatus(storages,replica),permissions:{allowCopy:replica.allowCopy,allowRename:replica.allowRename,allowQuarantine:replica.allowQuarantine}};
+  const result={...diff,generatedAt:new Date().toISOString(),ignoredDatabaseRefs:expected.ignored,sourceErrors:expected.sourceErrors,alias:aliasStatus(storages,replica),permissions:{allowCopy:replica.allowCopy,allowRename:replica.allowRename,allowQuarantine:replica.allowQuarantine},apiStats:metrics,snapshotTtlMinutes:30};
   await writeReplicaPreview(result);
   return result;
 }
 
-async function ensureDir(config,dir){
-  dir=cleanPath(dir);if(dir==='/')return;
+async function ensureDir(config,dir,seenDirs=new Set(),metrics){
+  dir=cleanPath(dir);if(dir==='/'||seenDirs.has(dir))return;
   const parts=dir.split('/').filter(Boolean);let current='';
-  for(const part of parts){current+=`/${part}`;try{await openListRequest(config,'/api/fs/mkdir',{body:{path:current}})}catch(e){if(!/exist|已存在|already/i.test(String(e.message||'')))throw e}}
+  for(const part of parts){
+    current+=`/${part}`;if(seenDirs.has(current))continue;
+    try{await openListRequest(config,'/api/fs/mkdir',{body:{path:current},metrics})}catch(e){if(!/exist|已存在|already/i.test(String(e.message||'')))throw e}
+    seenDirs.add(current);
+  }
 }
 function fullFromRelative(root,relative){return joinPath(root,String(relative||'').replace(/^\/+/,''))}
+async function currentPreview(){const p=await readReplicaPreview();return p&&previewFresh(p)?p:previewReplicas({forceRefresh:false})}
 
 export async function syncMissingReplicas({limit=20,targetStorageIds=[]}={}){
   const {config,replica}=await context();if(!replica.enabled)throw err('REPLICA_DISABLED','云盘副本管理尚未启用');if(!replica.allowCopy)throw err('REPLICA_COPY_DISABLED','请先开启“允许副本复制”');
-  const preview=await previewReplicas();const targetSet=new Set((targetStorageIds||[]).map(Number));const mountCfg=new Map(replica.mounts.map(x=>[x.storageId,x]));const mountState=new Map((preview.mounts||[]).map(x=>[Number(x.storageId),x]));const actions=[];const cap=Math.min(50,Math.max(1,Number(limit)||20));
-  for(const row of preview.rows){
-    const sourceId=Object.entries(row.copies).find(([id,present])=>present&&!mountState.get(Number(id))?.error)?.[0];if(!sourceId)continue;
+  const preview=await currentPreview();const targetSet=new Set((targetStorageIds||[]).map(Number));const mountCfg=new Map(replica.mounts.map(x=>[x.storageId,x]));const mountState=new Map((preview.mounts||[]).map(x=>[Number(x.storageId),x]));const actions=[];const cap=Math.min(50,Math.max(1,Number(limit)||20));
+  for(const row of preview.rows||[]){
+    const sourceId=Object.entries(row.copies||{}).find(([id,present])=>present&&!mountState.get(Number(id))?.error)?.[0];if(!sourceId)continue;
     const source=mountCfg.get(Number(sourceId));if(!source)continue;
-    for(const [id,present] of Object.entries(row.copies)){
+    for(const [id,present] of Object.entries(row.copies||{})){
       if(present)continue;const target=mountCfg.get(Number(id)),state=mountState.get(Number(id));if(!target||!target.writable||state?.error)continue;if(targetSet.size&&!targetSet.has(Number(id)))continue;
       if(state?.renameSuggestions?.some(x=>x.toRelative===row.relativePath))continue;
       actions.push({relativePath:row.relativePath,source,target});if(actions.length>=cap)break;
     }
     if(actions.length>=cap)break;
   }
-  const queued=[],failed=[];
+  const queued=[],failed=[],touched=new Set(),seenDirs=new Set(),metrics=makeMetrics();
   for(const a of actions){
     try{
       const src=fullFromRelative(a.source.rootPath,a.relativePath),dst=fullFromRelative(a.target.rootPath,a.relativePath);const srcDir=path.posix.dirname(src),dstDir=path.posix.dirname(dst),name=path.posix.basename(src);
-      await ensureDir(config,dstDir);await openListRequest(config,'/api/fs/copy',{body:{src_dir:srcDir,dst_dir:dstDir,names:[name]}});
-      queued.push({relativePath:a.relativePath,sourceStorageId:a.source.storageId,targetStorageId:a.target.storageId});
+      await ensureDir(config,dstDir,seenDirs,metrics);await openListRequest(config,'/api/fs/copy',{body:{src_dir:srcDir,dst_dir:dstDir,names:[name]},metrics});
+      queued.push({relativePath:a.relativePath,sourceStorageId:a.source.storageId,targetStorageId:a.target.storageId});touched.add(Number(a.target.storageId));
     }catch(e){failed.push({relativePath:a.relativePath,targetStorageId:a.target.storageId,message:e?.message||'复制失败'})}
   }
-  return {queued,failed,submitted:actions.length,note:'OpenList 跨存储复制可能进入后台任务队列；完成后重新对账即可确认副本。'};
+  if(touched.size)await invalidateReplicaSnapshots(replicaScopeKey(config),[...touched]);
+  return {queued,failed,submitted:actions.length,targetSnapshotsInvalidated:[...touched],apiStats:metrics,note:'OpenList 跨存储复制可能进入后台任务队列；目标盘快照已失效，稍后只刷新目标盘即可确认，不需要全盘重扫。'};
 }
 
 export async function renameReplicaSuggestion({storageId,fromRelative,toRelative}){
   const {config,replica}=await context();if(!replica.allowRename)throw err('REPLICA_RENAME_DISABLED','请先开启“允许名称修复”');
-  const preview=await previewReplicas();const mount=preview.mounts.find(x=>Number(x.storageId)===Number(storageId));
+  const preview=await currentPreview();const mount=preview.mounts.find(x=>Number(x.storageId)===Number(storageId));
   const valid=mount?.renameSuggestions?.some(x=>x.fromRelative===fromRelative&&x.toRelative===toRelative);if(!valid)throw err('REPLICA_RENAME_NOT_SUGGESTED','当前对账结果不再支持这条重命名建议，请重新预览');
   const cfg=replica.mounts.find(x=>Number(x.storageId)===Number(storageId));if(!cfg?.writable)throw err('REPLICA_TARGET_READONLY','目标网盘未标记为可写');
-  const source=fullFromRelative(cfg.rootPath,fromRelative);await openListRequest(config,'/api/fs/rename',{body:{path:source,name:path.posix.basename(toRelative)}});
-  return {renamed:true,storageId:Number(storageId),fromRelative,toRelative};
+  const metrics=makeMetrics();const source=fullFromRelative(cfg.rootPath,fromRelative);await openListRequest(config,'/api/fs/rename',{body:{path:source,name:path.posix.basename(toRelative)},metrics});
+  await invalidateReplicaSnapshots(replicaScopeKey(config),[Number(storageId)]);
+  const refreshed=await previewReplicas({forceRefresh:true,storageIds:[Number(storageId)]});
+  return {renamed:true,storageId:Number(storageId),fromRelative,toRelative,preview:refreshed,apiStats:metrics};
 }
 
 export async function quarantineReplicaExtras({items=[]}={}){
   const {config,replica}=await context();if(!replica.allowQuarantine)throw err('REPLICA_QUARANTINE_DISABLED','请先开启“允许移动到隔离区”');
-  const preview=await previewReplicas();const selected=(items||[]).slice(0,50),moved=[],failed=[];const today=new Date().toISOString().slice(0,10);
+  const preview=await currentPreview();const selected=(items||[]).slice(0,50),moved=[],failed=[];const today=new Date().toISOString().slice(0,10);const touched=new Set(),seenDirs=new Set(),metrics=makeMetrics();
   for(const item of selected){
     const mount=preview.mounts.find(x=>Number(x.storageId)===Number(item.storageId));const cfg=replica.mounts.find(x=>Number(x.storageId)===Number(item.storageId));
     if(!mount||mount.error||!cfg?.writable||!mount.extra.some(x=>x.relativePath===item.relativePath)){failed.push({...item,message:'不是当前可隔离的多余 IPA，或目标网盘不可写'});continue}
     try{
       const src=fullFromRelative(cfg.rootPath,item.relativePath),srcDir=path.posix.dirname(src),name=path.posix.basename(src);const relativeDir=path.posix.dirname(item.relativePath)==='.'?'':path.posix.dirname(item.relativePath);
-      const dstDir=joinPath(cfg.rootPath,replica.quarantineFolder,today,relativeDir);await ensureDir(config,dstDir);await openListRequest(config,'/api/fs/move',{body:{src_dir:srcDir,dst_dir:dstDir,names:[name]}});moved.push(item);
+      const dstDir=joinPath(cfg.rootPath,replica.quarantineFolder,today,relativeDir);await ensureDir(config,dstDir,seenDirs,metrics);await openListRequest(config,'/api/fs/move',{body:{src_dir:srcDir,dst_dir:dstDir,names:[name]},metrics});moved.push(item);touched.add(Number(item.storageId));
     }catch(e){failed.push({...item,message:e?.message||'隔离失败'})}
   }
-  return {moved,failed,quarantineFolder:replica.quarantineFolder,permanentDelete:false};
+  let refreshed=null;if(touched.size){await invalidateReplicaSnapshots(replicaScopeKey(config),[...touched]);refreshed=await previewReplicas({forceRefresh:true,storageIds:[...touched]})}
+  return {moved,failed,quarantineFolder:replica.quarantineFolder,permanentDelete:false,preview:refreshed,apiStats:metrics};
 }
