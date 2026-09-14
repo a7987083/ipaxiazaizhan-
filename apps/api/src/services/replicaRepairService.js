@@ -67,7 +67,7 @@ async function inspectFile(config,{rootPath,relativePath,storageId,expectedMd5},
     const dir=path.posix.dirname(full),name=path.posix.basename(full),key=`${Number(storageId)}|${dir}`;
     let content=directoryCache.get(key);
     if(!content){
-      const listed=await openListRequest(config,'/api/fs/list',{body:{path:dir,password:'',page:1,per_page:0,refresh:false},timeoutMs:20000,metrics});
+      const listed=await openListRequest(config,'/api/fs/list',{body:{path:dir,password:'',page:1,per_page:0,refresh:true},timeoutMs:20000,metrics});
       content=Array.isArray(listed?.content)?listed.content:[];directoryCache.set(key,content);
     }
     const item=content.find(x=>String(x?.name||'')===name);
@@ -144,16 +144,32 @@ export async function repairIntegrityReplicas({limit=20,targetStorageIds=[],plan
       const quarantineBase=cleanPath(target.mountPath||a.targetMountPath||target.rootPath);
       const quarantineDir=joinPath(quarantineBase,replica.quarantineFolder,'repair',today,repairId,relativeDir);
       await ensureDir(config,quarantineDir,seenDirs,metrics);
-      await openListRequest(config,'/api/fs/move',{body:{src_dir:dstDir,dst_dir:quarantineDir,names:[name]},metrics});
-      moved=true;touched.add(Number(target.storageId));const quarantinePath=joinPath(quarantineDir,name);quarantined.push({...a,quarantinePath});
-      await appendReplicaAudit({type:'repair_quarantine',status:'success',storageId:Number(target.storageId),relativePath:a.relativePath,sourceStorageId:Number(source.storageId),targetStorageId:Number(target.storageId),message:`异常副本已移动到 ${quarantinePath}`}).catch(()=>{});
+
+      // Current OpenList /api/fs/move returns after scheduling an async task.
+      // First free the canonical target name with synchronous /api/fs/rename, then the
+      // asynchronous move can no longer race the refill copy for the original filename.
+      const stagedName=`.zonoe-repair-${repairId}-${fingerprint(name)}.quarantine`;
+      await openListRequest(config,'/api/fs/rename',{body:{path:dst,name:stagedName},metrics});
+      moved=true;touched.add(Number(target.storageId));
+      const stagedPath=joinPath(dstDir,stagedName),quarantinePath=joinPath(quarantineDir,stagedName);
+      let quarantineMoveAccepted=false,quarantineMoveError='';
+      try{
+        await openListRequest(config,'/api/fs/move',{body:{src_dir:dstDir,dst_dir:quarantineDir,names:[stagedName]},metrics});
+        quarantineMoveAccepted=true;
+        await appendReplicaAudit({type:'repair_quarantine_move',status:'submitted',storageId:Number(target.storageId),relativePath:a.relativePath,sourceStorageId:Number(source.storageId),targetStorageId:Number(target.storageId),message:`隔离文件移动任务已提交：${quarantinePath}`}).catch(()=>{});
+      }catch(moveError){
+        quarantineMoveError=moveError?.message||'隔离文件移动任务提交失败';
+        await appendReplicaAudit({type:'repair_quarantine_move',status:'failed',storageId:Number(target.storageId),relativePath:a.relativePath,sourceStorageId:Number(source.storageId),targetStorageId:Number(target.storageId),message:`异常副本已原地隔离为 ${stagedPath}；${quarantineMoveError}`}).catch(()=>{});
+      }
+      quarantined.push({...a,stagedPath,quarantinePath,quarantineMoveAccepted,quarantineMoveError});
+      await appendReplicaAudit({type:'repair_quarantine',status:'success',storageId:Number(target.storageId),relativePath:a.relativePath,sourceStorageId:Number(source.storageId),targetStorageId:Number(target.storageId),message:`异常副本已同步改名隔离为 ${stagedPath}${quarantineMoveAccepted?`；移动到 ${quarantinePath} 的后台任务已提交`:'；即使移动任务失败也不会覆盖或删除该隔离文件'}`}).catch(()=>{});
 
       await ensureDir(config,dstDir,seenDirs,metrics);
       await openListRequest(config,'/api/fs/copy',{body:{src_dir:srcDir,dst_dir:dstDir,names:[path.posix.basename(src)]},metrics});
-      queued.push({...a,quarantinePath});queuedTargets.add(Number(target.storageId));
-      await appendReplicaAudit({type:'repair_refill',status:'submitted',storageId:Number(target.storageId),relativePath:a.relativePath,sourceStorageId:Number(source.storageId),targetStorageId:Number(target.storageId),message:'异常副本已隔离；已从 MD5 已验证来源提交补回，等待独立核验'}).catch(()=>{});
+      queued.push({...a,stagedPath,quarantinePath,quarantineMoveAccepted});queuedTargets.add(Number(target.storageId));
+      await appendReplicaAudit({type:'repair_refill',status:'submitted',storageId:Number(target.storageId),relativePath:a.relativePath,sourceStorageId:Number(source.storageId),targetStorageId:Number(target.storageId),message:'异常副本已同步改名隔离；已从 MD5 已验证来源提交补回，等待独立核验'}).catch(()=>{});
     }catch(e){
-      const message=moved?`异常副本已安全隔离，但补回未完成：${e?.message||'修复失败'}`:(e?.message||'修复失败');
+      const message=moved?`异常副本已同步改名隔离，但补回未完成：${e?.message||'修复失败'}`:(e?.message||'修复失败');
       failed.push({...a,message,quarantined:moved});
       await appendReplicaAudit({type:moved?'repair_refill':'repair_precheck',status:'failed',storageId:Number(a.targetStorageId),relativePath:a.relativePath,sourceStorageId:Number(a.sourceStorageId),targetStorageId:Number(a.targetStorageId),message}).catch(()=>{});
     }
@@ -173,6 +189,6 @@ export async function repairIntegrityReplicas({limit=20,targetStorageIds=[],plan
   return {
     repairedSubmitted:queued,failed,quarantined,submitted:plan.actions.length,executedPlanHash:plan.planHash,trackingBatchId:tracking?.batch?.id||'',trackingBatch:tracking?.batch||null,
     targetSnapshotsInvalidated:[...touched],failedOnlyTargetsRefreshed:failedOnlyTargets,failedOnlyPreview,permanentDelete:false,apiStats:metrics,
-    note:'异常副本先移动到隔离区，再从 MD5 已验证来源补回；不会永久删除。已提交的补回任务继续由副本任务页面独立核验。'
+    note:'异常副本先同步改名隔离，避免 OpenList 异步 move 与补回 copy 竞争；随后提交后台移动到隔离目录并从 MD5 已验证来源补回。不会永久删除。补回继续由副本任务页面独立核验。'
   };
 }
