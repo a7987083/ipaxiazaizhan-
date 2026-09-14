@@ -2,7 +2,7 @@
 
 ## 2026091229 candidate
 
-- CI for the 1229 candidate is not yet claimed. Source changes must pass integration/build/package validation before deployment is recommended.
+- Actions #142 / run `34838613229` passed source tests, production build, smoke/contracts, deployment package validation and artifact upload. Real BaoTa/OpenList 1229 behavior is still pending production verification.
 - Integrity verification is only as strong as the expected metadata available to ZONOE. When the metadata cache has a valid expected MD5, equal MD5 is authoritative. When comparable MD5 is unavailable, the file is deliberately marked `unverified`; size alone does not prove identical content.
 - A known size mismatch is treated as an integrity problem when both expected and actual sizes are available. The expected size comes from the OpenList IPA metadata cache, not blindly from a potentially stale database value.
 - MD5/size mismatch files are blocked from automatic source selection and are not automatically overwritten. 1229 intentionally stops at detection/visibility; a later version can add a controlled “quarantine bad copy then refill from verified source” workflow after real validation.

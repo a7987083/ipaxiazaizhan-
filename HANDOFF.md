@@ -4,8 +4,10 @@
 - Branch: `feature/baota-native-deploy-v1`
 - Candidate: `2026091229`
 - Baseline: `2026091228` / `53c925fb74508da32ba97d1f530d9d3405d5883b`
-- Candidate CI: pending
-- Real BaoTa/OpenList 1229 verification: pending
+- Functional code: `4bc2dcd0e9fe8adedb25aea0f0e4d82eac885adf`
+- Contract fix: `6534f1529bb298c56e7c30fe425e28064879a5d1`
+- Functional CI: Actions #142 / run `34838613229` passed validation and package jobs.
+- Real BaoTa/OpenList 1229 verification: pending.
 
 ## What 1229 changes
 
@@ -20,20 +22,28 @@
 9. Per-target planning remains supported, so an admin can preview/execute only the missing copies for one writable drive.
 10. 1228 request throttling, 30-minute per-drive snapshots, target-only snapshot invalidation, Range budgets/telemetry, MD5 metadata reuse, Alias UX and quarantine behavior remain unchanged.
 
-## Candidate verification
+## CI verification
 
-New/updated tests cover:
-- integrity state classification;
-- same-path wrong-MD5/wrong-size detection;
-- verified-source preference over unverified source;
-- configured source order within the same integrity class;
-- mismatch targets blocked from automatic overwrite;
-- deterministic sync-plan hashes and target filtering;
-- admin UX contract for source priority, plan preview and integrity warnings.
+Actions #141 first failed only because one 1228 UI contract still required the old button text `补齐此盘缺失（20 个）`; all new integrity/sync-plan tests passed in that run. The stale contract was updated to the new plan-first wording without changing business logic.
 
-CI has not yet been claimed for this candidate. Do not mark 1229 production-ready until the branch workflow is green.
+Actions #142 / run `34838613229` then passed:
+- Integration tests
+- replica integrity contracts
+- sync-plan/source-priority contracts
+- replica admin UX contracts
+- Production build
+- Native API smoke
+- Native frontend static smoke
+- Shell validation
+- BaoTa native contract
+- MySQL multi-source contract
+- GitHub updater contract
+- Legacy Docker compose syntax
+- deployment package build/validation/artifact upload
 
-## Recommended real validation after CI
+`release-e2e` remains skipped by workflow condition, so real BaoTa/OpenList behavior is not claimed as verified.
+
+## Recommended real validation
 
 Deploy 2026091229 and run one forced reconciliation. Confirm each drive shows separate counts for verified/unverified/integrity-error/missing/extra. Pick one known IPA with MD5 and compare at least two drives. Then use “预览补齐计划（20 个）” and confirm the UI shows exactly which drive supplies each target. Change drive priority, save, reconcile, and verify same-integrity sources follow the new order. Do not intentionally corrupt production files merely to test mismatch handling; use a known existing mismatch or a disposable test path if needed.
 

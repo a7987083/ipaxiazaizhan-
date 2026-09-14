@@ -8,9 +8,10 @@
     "ci": "passed"
   },
   "phase": "Phase 2.4 Replica Integrity + Sync Plan + Source Priority",
-  "phase_status": "candidate_ci_pending_real_baota_openlist_e2e_pending",
+  "phase_status": "ci_passed_real_baota_openlist_e2e_pending",
   "production_verified": false,
-  "functional_code_commit": "pending",
+  "functional_code_commit": "4bc2dcd0e9fe8adedb25aea0f0e4d82eac885adf",
+  "contract_fix_commit": "6534f1529bb298c56e7c30fe425e28064879a5d1",
   "features": {
     "replica_integrity_schema_version": 2,
     "replica_integrity_md5_verified": true,
@@ -29,12 +30,25 @@
     "existing_range_budget_and_metrics_preserved": true
   },
   "verification": {
-    "github_actions_run": "pending",
-    "integration_tests": "pending",
-    "replica_integrity_contract_tests": "pending",
-    "replica_sync_plan_contract_tests": "pending",
-    "production_build": "pending",
-    "deployment_package_build_and_validation": "pending",
+    "initial_1229_run_141": "failed_only_stale_1228_ui_text_contract",
+    "github_actions_run": 34838613229,
+    "github_actions_run_number": 142,
+    "github_actions_conclusion": "success",
+    "integration_tests": "passed",
+    "replica_integrity_contract_tests": "passed",
+    "replica_sync_plan_contract_tests": "passed",
+    "replica_admin_ux_contract_tests": "passed",
+    "production_build": "passed",
+    "native_api_smoke": "passed",
+    "native_frontend_static_smoke": "passed",
+    "shell_validation": "passed",
+    "baota_native_contract": "passed",
+    "mysql_multi_source_contract": "passed",
+    "github_updater_contract": "passed",
+    "legacy_docker_compose_syntax": "passed",
+    "deployment_package_build_and_validation": "passed",
+    "artifact_upload": "passed",
+    "release_e2e": "skipped_by_workflow_condition",
     "real_baota_1229_e2e": "pending",
     "real_md5_mismatch_detection": "pending",
     "real_sync_plan_source_target_preview": "pending",
@@ -42,5 +56,5 @@
     "real_stale_plan_rejection": "pending"
   },
   "important_runtime_rule": "A same-path IPA is no longer considered fully healthy merely because it exists. When an expected MD5 is available, only an equal MD5 with compatible known size is verified. MD5/size mismatches are displayed as integrity problems, are never used as automatic copy sources, and are not automatically overwritten.",
-  "next_task": "Run CI for 2026091229. After CI passes, deploy to BaoTa, force one fresh reconciliation to produce schema-v2 integrity states, verify one real mismatch/unverified sample, preview a 20-item sync plan and confirm the displayed source-to-target choices match the configured priority before executing any copy."
+  "next_task": "Deploy 2026091229 to BaoTa, force one fresh reconciliation to produce schema-v2 integrity states, verify real verified/unverified/mismatch samples, preview a 20-item sync plan and confirm the displayed source-to-target choices match the configured priority before executing any copy."
 }

@@ -20,7 +20,7 @@
 - [x] Preserve per-target planning for one writable drive
 - [x] Ignore incompatible pre-1229 persisted previews while preserving reusable directory snapshots
 - [x] Add contract tests for integrity classification, source selection, target filtering and plan hashing
-- [ ] 2026091229 candidate GitHub Actions passes validation/build/package jobs
+- [x] 2026091229 Actions #142 / run `34838613229` passed validation/build/package jobs
 - [ ] Deploy 2026091229 to real BaoTa
 - [ ] Force one fresh reconciliation and verify schema-v2 integrity counts on real drives
 - [ ] Verify one real known-MD5 file reports `verified` on matching drives
@@ -30,7 +30,7 @@
 - [ ] Verify stale plan rejection if reconciliation/config changes between preview and execute
 - [ ] Continue 1228 real OpenList request-count / Range telemetry verification
 - [ ] Continue real Alias load-balancing, account-switch, copy/rename/quarantine E2E
-- [ ] After the above, build asynchronous copy-task history/audit as the next phase
+- [ ] Next phase: asynchronous copy-task lifecycle and operation audit history
 - [ ] Consider controlled preview/batch migration of MySQL `bt1a` from physical URLs to Alias URLs only after Alias E2E is proven
 
 ## Important integrity rule
@@ -49,3 +49,4 @@ A file existing at the expected path is no longer sufficient to call the replica
 - `2026091226`: content-addressed IPA parse persistence across account/path changes; CI passed; real account-switch E2E pending.
 - `2026091227`: persisted reconciliation + paginated/collapsible multi-drive UI + Alias distribution guide; CI passed; real Alias E2E pending.
 - `2026091228`: API scheduling, persistent per-drive snapshots, targeted refresh, Range usage telemetry/budgets and core MD5 pre-parse reuse; CI passed; real traffic profile pending.
+- `2026091229`: replica integrity classification + source-priority sync planning + stale-plan protection; CI #142 passed; real multi-drive E2E pending.

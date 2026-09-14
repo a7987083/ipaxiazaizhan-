@@ -1,5 +1,21 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091229 Replica integrity + sync plan + source priority
+
+- 多网盘对账新增副本完整性状态：`verified`、`missing`、`md5_mismatch`、`size_mismatch`、`unverified`。同路径存在不再自动视为健康副本。
+- 当元数据缓存已有期望 MD5 时，只有 MD5 相同且已知大小不冲突才计为已验证；缺少可比 Hash 时明确标记为“未验证”，避免把未知状态伪装成正常。
+- MD5/大小异常副本单独列出，自动补齐不会把异常副本当来源，也不会直接覆盖异常目标；后续修复需要显式处置。
+- 对账持久结果升级为 schema v2。1228 的旧对账快照不再直接恢复为当前结果，升级后需要重新对账；30 分钟实体网盘目录快照仍可复用。
+- 新增 `POST /api/v1/admin/openlist/replicas/sync-plan`：复制前先生成只读补齐计划，后台明确展示每条 `来源盘 → 目标盘`，预览阶段不会调用 `/api/fs/copy`。
+- 补齐计划新增 SHA-256 `planHash`。执行时重新计算来源/目标动作集合；如果配置或对账状态已经变化，返回 `REPLICA_PLAN_CHANGED`，要求重新预览，避免执行过期计划。
+- OpenList 实体盘在副本配置中的顺序现在同时作为来源优先级，后台可通过上移/下移调整并持久保存。相同完整性等级时优先选择排名靠前的盘。
+- 安全规则优先于人工排序：MD5 已验证来源始终优先于未验证来源；MD5/大小异常副本永远不能成为自动补齐来源。
+- 保留按目标盘生成计划，可只预览并补齐某一个可写盘；单次上限仍为 20（API 最多 50）个复制动作。
+- 新增/扩展 contract tests：完整性状态、同名错误内容检测、已验证来源优先、同等级来源顺序、异常目标禁止自动覆盖、目标盘过滤、计划 Hash 稳定性、后台来源/目标预览 UI。
+- Actions #141 首次失败仅因为 1228 的旧 UI contract 仍要求按钮文案 `补齐此盘缺失（20 个）`；本轮新增完整性和 sync-plan 测试全部通过，业务逻辑未失败。
+- 更新旧契约为新的“预览补齐此盘（20 个）/补齐计划预览”语义后，Actions #142 / run `34838613229`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、Legacy Docker compose syntax、部署包构建/校验和 Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
+- 真实 BaoTa/OpenList 的 MD5 不一致识别、来源优先级、计划预览/执行、过期计划拦截仍待生产 E2E 验证。
+
 ## 2026-09-14 — 2026091228 OpenList API scheduling + Range budget hardening
 
 - 元数据和多网盘副本目录扫描统一改为 OpenList `/api/fs/list` 的 `per_page:0` + `refresh:false`。平铺约 7271 个 IPA 的目录不再按 500 条分页，ZONOE→OpenList 列表调用理论上由约 15 次降到 1 次；子目录仍按目录各请求一次。
