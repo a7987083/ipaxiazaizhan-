@@ -9,6 +9,7 @@ function normalize(value){
   if(!value||typeof value!=='object')return null;
   return {
     version:2,
+    replicaSchemaVersion:Number(value.replicaSchemaVersion||0),
     generatedAt:value.generatedAt||null,
     expectedCount:Number(value.expectedCount||0),
     mounts:Array.isArray(value.mounts)?value.mounts:[],
