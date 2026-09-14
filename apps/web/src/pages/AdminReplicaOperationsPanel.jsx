@@ -8,7 +8,7 @@ function statusText(status){
 function verificationText(v){
   return ({md5:'MD5 一致',size:'大小一致',size_only_no_hash:'大小一致（目标盘未返回 MD5）',presence_only:'仅确认文件存在',md5_mismatch:'MD5 不一致',size_mismatch:'大小不一致',scope_changed:'OpenList 配置已变化',api_permission_error:'OpenList 权限错误',not_found:'目标未出现',waiting:'等待目标文件',incomplete_metadata:'等待验证信息'})[v]||v||'—';
 }
-function auditText(type){return ({copy_batch:'复制批次',copy_verify:'复制核验',copy_target_refresh:'目标盘刷新',repair_quarantine:'修复隔离',repair_refill:'修复补回',repair_precheck:'修复前检查',repair_target_refresh:'修复后刷新',rename:'名称修复',quarantine:'隔离'})[type]||type||'操作';}
+function auditText(type){return ({copy_batch:'复制批次',copy_verify:'复制核验',copy_target_refresh:'目标盘刷新',repair_quarantine:'修复隔离',repair_quarantine_move:'隔离移动',repair_refill:'修复补回',repair_precheck:'修复前检查',repair_target_refresh:'修复后刷新',rename:'名称修复',quarantine:'隔离'})[type]||type||'操作';}
 function timeText(v){try{return v?new Date(v).toLocaleString():'—'}catch{return '—'}}
 
 export default function AdminReplicaOperationsPanel(){
