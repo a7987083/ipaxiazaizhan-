@@ -12,7 +12,7 @@ describe('replica admin UX',()=>{
     const store=read('apps/api/src/services/replicaPreviewStore.js');
     expect(service).toContain('readReplicaPreview');
     expect(service).toContain('writeReplicaPreview');
-    expect(service).toContain('lastPreview:await readReplicaPreview()');
+    expect(service).toContain('lastPreview:previewCompatible(savedPreview)?savedPreview:null');
     expect(service).toContain('await clearReplicaPreview()');
     expect(store).toContain('openlist-replica-preview.json');
   });
@@ -25,6 +25,25 @@ describe('replica admin UX',()=>{
     expect(ui).toContain('多余 IPA（');
     expect(ui).not.toContain('数据库不存在的多余 IPA');
     expect(ui).toContain('结果已持久化，切换页面不会消失');
+  });
+
+  test('sync plan is visible before execution and source priority is controllable',()=>{
+    const ui=read('apps/web/src/pages/AdminReplicaPanel.jsx');
+    const routes=read('apps/api/src/routes/adminReplicaRoutes.js');
+    expect(ui).toContain('来源优先级');
+    expect(ui).toContain('补齐计划预览');
+    expect(ui).toContain('来源盘 → 目标盘');
+    expect(ui).toContain('确认执行当前计划');
+    expect(routes).toContain("'/openlist/replicas/sync-plan'");
+    expect(routes).toContain('planHash');
+  });
+
+  test('integrity mismatch is surfaced and not auto-overwritten',()=>{
+    const ui=read('apps/web/src/pages/AdminReplicaPanel.jsx');
+    expect(ui).toContain('副本完整性异常');
+    expect(ui).toContain('MD5 不一致');
+    expect(ui).toContain('大小不一致');
+    expect(ui).toContain('异常副本不会自动作为复制来源，也不会被自动覆盖');
   });
 
   test('Alias load balancing has an actionable setup guide',()=>{

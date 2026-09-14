@@ -11,6 +11,7 @@ import {
 
 const MAX_SCAN_FILES=20000;
 const MAX_SCAN_DIRS=1000;
+const REPLICA_SCHEMA_VERSION=2;
 
 function cleanPath(v='/'){
   let s=String(v||'/').trim().replace(/\\/g,'/');
@@ -39,6 +40,7 @@ function err(code,message,details){return Object.assign(new Error(message),{code
 function fingerprint(v){return createHash('sha256').update(String(v||'')).digest('hex').slice(0,16)}
 function replicaScopeKey(config){return `${String(config.url||'').replace(/\/+$/,'')}|${fingerprint(config.token)}`}
 function previewFresh(p){const t=Date.parse(String(p?.generatedAt||''));return Number.isFinite(t)&&Date.now()-t<REPLICA_SNAPSHOT_TTL_MS}
+function previewCompatible(p){return Number(p?.replicaSchemaVersion||0)>=REPLICA_SCHEMA_VERSION}
 function makeMetrics(){return {openListRequests:0,fsListRequests:0,storageListRequests:0,fileOperationRequests:0,snapshotHits:0,remoteMountScans:0}}
 
 async function openListRequest(config,apiPath,{method='POST',body,query,timeoutMs=30000,metrics}={}){
@@ -48,7 +50,7 @@ async function openListRequest(config,apiPath,{method='POST',body,query,timeoutM
     const base=String(config.url||'').replace(/\/+$/,'');
     const u=new URL(`${base}${apiPath}`);
     for(const [k,v] of Object.entries(query||{}))if(v!==undefined&&v!==null)u.searchParams.set(k,String(v));
-    const options={method,headers:{Authorization:config.token,'User-Agent':'zonoe-openlist-replica/1.1'},signal:controller.signal};
+    const options={method,headers:{Authorization:config.token,'User-Agent':'zonoe-openlist-replica/1.2'},signal:controller.signal};
     if(body!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body)}
     const res=await fetch(u,options);const json=await res.json().catch(()=>null);
     if(!res.ok||!json||json.code!==200)throw err('OPENLIST_API_FAILED',json?.message||`OpenList HTTP ${res.status}`,{status:res.status,apiPath});
@@ -97,7 +99,10 @@ async function readExpected(config){
         const relativePath=relativeFromApiPath(apiPath,config.apiBasePath||'/');
         if(relativePath===null||!relativePath||!relativePath.toLowerCase().endsWith('.ipa')){ignored+=1;continue}
         const app={appKey:`${source.slug}:${Number(id)}`,sourceSlug:source.slug,sourceName:source.name,legacyId:Number(id),name:fromHex(nameHex).trim(),version:fromHex(versionHex).trim(),downloadUrl,dbSize:numeric(fromHex(sizeHex))};
-        if(!byPath.has(relativePath))byPath.set(relativePath,{relativePath,apiPath,fileName:path.posix.basename(relativePath),apps:[],md5:String(cache.files?.[apiPath]?.md5||'').toUpperCase(),size:Number(cache.files?.[apiPath]?.size||0)});
+        if(!byPath.has(relativePath)){
+          const cached=cache.files?.[apiPath]||{};
+          byPath.set(relativePath,{relativePath,apiPath,fileName:path.posix.basename(relativePath),apps:[],md5:String(cached.md5||'').toUpperCase(),size:Number(cached.size||0)});
+        }
         byPath.get(relativePath).apps.push(app);
       }
     }catch(e){sourceErrors.push({source:source.slug,message:e?.message||'读取软件源失败'})}
@@ -106,21 +111,39 @@ async function readExpected(config){
 }
 
 function sameDir(a,b){return path.posix.dirname(a||'')===path.posix.dirname(b||'')}
+export function replicaIntegrityStatus(expected,actual){
+  if(!actual)return 'missing';
+  const expectedMd5=String(expected?.md5||'').toUpperCase(),actualMd5=String(actual?.md5||'').toUpperCase();
+  const expectedSize=Number(expected?.size||0),actualSize=Number(actual?.size||0);
+  if(expectedMd5&&actualMd5&&expectedMd5!==actualMd5)return 'md5_mismatch';
+  if(expectedSize>0&&actualSize>0&&expectedSize!==actualSize)return 'size_mismatch';
+  if(expectedMd5&&actualMd5&&expectedMd5===actualMd5)return 'verified';
+  return 'unverified';
+}
+
 export function buildReplicaDiff(expectedItems,mountSnapshots){
   const expected=new Map((expectedItems||[]).map(x=>[x.relativePath,x]));
   const rows=[];const perMount=[];
   for(const snap of mountSnapshots||[]){
-    const actual=snap.files||{};const missing=[],extra=[];
-    for(const item of expected.values())if(!actual[item.relativePath])missing.push(item);
+    const actual=snap.files||{};const missing=[],extra=[],integrityIssues=[];let verified=0,unverified=0,present=0;
+    for(const item of expected.values()){
+      const found=actual[item.relativePath];const status=replicaIntegrityStatus(item,found);
+      if(status==='missing'){missing.push(item);continue}
+      present+=1;
+      if(status==='verified'){verified+=1;continue}
+      if(status==='unverified'){unverified+=1;continue}
+      integrityIssues.push({relativePath:item.relativePath,status,apps:item.apps||[],expectedMd5:String(item.md5||''),actualMd5:String(found?.md5||''),expectedSize:Number(item.size||0),actualSize:Number(found?.size||0)});
+    }
     for(const item of Object.values(actual))if(!expected.has(item.relativePath))extra.push(item);
     const extraByMd5=new Map();for(const x of extra)if(x.md5){if(!extraByMd5.has(x.md5))extraByMd5.set(x.md5,[]);extraByMd5.get(x.md5).push(x)}
     const renameSuggestions=[];
     for(const x of missing){if(!x.md5)continue;const candidates=extraByMd5.get(x.md5)||[];const same=candidates.filter(c=>sameDir(c.relativePath,x.relativePath));if(same.length===1)renameSuggestions.push({fromRelative:same[0].relativePath,toRelative:x.relativePath,md5:x.md5})}
-    perMount.push({storageId:snap.storageId,label:snap.label,mountPath:snap.mountPath,rootPath:snap.rootPath,writable:snap.writable,error:snap.error||null,total:Object.keys(actual).length,expected:expected.size,present:expected.size-missing.length,missing,extra,renameSuggestions,snapshot:snap.snapshot||null});
+    perMount.push({storageId:snap.storageId,label:snap.label,mountPath:snap.mountPath,rootPath:snap.rootPath,writable:snap.writable,error:snap.error||null,total:Object.keys(actual).length,expected:expected.size,present,verified,unverified,integrityIssues,missing,extra,renameSuggestions,snapshot:snap.snapshot||null});
   }
   for(const item of expected.values()){
-    const copies={};for(const snap of mountSnapshots||[])copies[snap.storageId]=Boolean(snap.files?.[item.relativePath]);
-    rows.push({...item,copies});
+    const copies={},copyStatus={};
+    for(const snap of mountSnapshots||[]){const found=snap.files?.[item.relativePath];copies[snap.storageId]=Boolean(found);copyStatus[snap.storageId]=replicaIntegrityStatus(item,found)}
+    rows.push({...item,copies,copyStatus});
   }
   return {expectedCount:expected.size,mounts:perMount,rows};
 }
@@ -153,7 +176,8 @@ async function context(){
 export async function getReplicaManagerState(){
   const {config,replica}=await context();let storages=[],storageError=null;const metrics=makeMetrics();
   try{storages=await listOpenListStorages(config,metrics)}catch(e){storageError=e?.message||'无法读取 OpenList 存储列表'}
-  return {config:replica,openListUrl:String(config.url||''),storages:storages.map(publicStorage),storageError,alias:storages.length?aliasStatus(storages,replica):null,lastPreview:await readReplicaPreview(),apiStats:metrics,snapshotTtlMinutes:30};
+  const savedPreview=await readReplicaPreview();
+  return {config:replica,openListUrl:String(config.url||''),storages:storages.map(publicStorage),storageError,alias:storages.length?aliasStatus(storages,replica):null,lastPreview:previewCompatible(savedPreview)?savedPreview:null,apiStats:metrics,snapshotTtlMinutes:30};
 }
 
 export async function saveReplicaManagerConfig(input){
@@ -192,7 +216,7 @@ export async function previewReplicas({forceRefresh=false,storageIds=[]}={}){
   }
   if(dirty)await writeReplicaSnapshots(cache);
   const diff=buildReplicaDiff(expected.items,snapshots);
-  const result={...diff,generatedAt:new Date().toISOString(),ignoredDatabaseRefs:expected.ignored,sourceErrors:expected.sourceErrors,alias:aliasStatus(storages,replica),permissions:{allowCopy:replica.allowCopy,allowRename:replica.allowRename,allowQuarantine:replica.allowQuarantine},apiStats:metrics,snapshotTtlMinutes:30};
+  const result={...diff,replicaSchemaVersion:REPLICA_SCHEMA_VERSION,generatedAt:new Date().toISOString(),ignoredDatabaseRefs:expected.ignored,sourceErrors:expected.sourceErrors,alias:aliasStatus(storages,replica),permissions:{allowCopy:replica.allowCopy,allowRename:replica.allowRename,allowQuarantine:replica.allowQuarantine},apiStats:metrics,snapshotTtlMinutes:30};
   await writeReplicaPreview(result);
   return result;
 }
@@ -207,31 +231,67 @@ async function ensureDir(config,dir,seenDirs=new Set(),metrics){
   }
 }
 function fullFromRelative(root,relative){return joinPath(root,String(relative||'').replace(/^\/+/,''))}
-async function currentPreview(){const p=await readReplicaPreview();return p&&previewFresh(p)?p:previewReplicas({forceRefresh:false})}
+async function currentPreview(){const p=await readReplicaPreview();return p&&previewCompatible(p)&&previewFresh(p)?p:previewReplicas({forceRefresh:false})}
+function rowStatus(row,id){return String(row?.copyStatus?.[id]||(row?.copies?.[id]?'unverified':'missing'))}
+function sourceStatusRank(status){return status==='verified'?0:status==='unverified'?1:9}
 
-export async function syncMissingReplicas({limit=20,targetStorageIds=[]}={}){
-  const {config,replica}=await context();if(!replica.enabled)throw err('REPLICA_DISABLED','云盘副本管理尚未启用');if(!replica.allowCopy)throw err('REPLICA_COPY_DISABLED','请先开启“允许副本复制”');
-  const preview=await currentPreview();const targetSet=new Set((targetStorageIds||[]).map(Number));const mountCfg=new Map(replica.mounts.map(x=>[x.storageId,x]));const mountState=new Map((preview.mounts||[]).map(x=>[Number(x.storageId),x]));const actions=[];const cap=Math.min(50,Math.max(1,Number(limit)||20));
-  for(const row of preview.rows||[]){
-    const sourceId=Object.entries(row.copies||{}).find(([id,present])=>present&&!mountState.get(Number(id))?.error)?.[0];if(!sourceId)continue;
-    const source=mountCfg.get(Number(sourceId));if(!source)continue;
-    for(const [id,present] of Object.entries(row.copies||{})){
-      if(present)continue;const target=mountCfg.get(Number(id)),state=mountState.get(Number(id));if(!target||!target.writable||state?.error)continue;if(targetSet.size&&!targetSet.has(Number(id)))continue;
-      if(state?.renameSuggestions?.some(x=>x.toRelative===row.relativePath))continue;
-      actions.push({relativePath:row.relativePath,source,target});if(actions.length>=cap)break;
+export function buildReplicaSyncPlan(preview,replica,{limit=20,targetStorageIds=[]}={}){
+  const cap=Math.min(50,Math.max(1,Number(limit)||20));
+  const targetSet=new Set((targetStorageIds||[]).map(Number));
+  const mounts=(replica?.mounts||[]).filter(x=>x.enabled!==false);
+  const mountState=new Map((preview?.mounts||[]).map(x=>[Number(x.storageId),x]));
+  const priority=new Map(mounts.map((x,i)=>[Number(x.storageId),i]));
+  const actions=[];let skippedNoSource=0,blockedIntegrity=0,skippedRename=0;
+  for(const row of preview?.rows||[]){
+    const candidates=mounts.map(m=>({mount:m,status:rowStatus(row,m.storageId),state:mountState.get(Number(m.storageId))}))
+      .filter(x=>!x.state?.error&&sourceStatusRank(x.status)<9)
+      .sort((a,b)=>sourceStatusRank(a.status)-sourceStatusRank(b.status)||(priority.get(Number(a.mount.storageId))??9999)-(priority.get(Number(b.mount.storageId))??9999));
+    const source=candidates[0]||null;
+    let rowNeedsSource=false;
+    for(const target of mounts){
+      const id=Number(target.storageId),state=mountState.get(id),status=rowStatus(row,id);
+      if(targetSet.size&&!targetSet.has(id))continue;
+      if(!target.writable||state?.error)continue;
+      if(['md5_mismatch','size_mismatch'].includes(status)){blockedIntegrity+=1;continue}
+      if(status!=='missing')continue;
+      if(state?.renameSuggestions?.some(x=>x.toRelative===row.relativePath)){skippedRename+=1;continue}
+      if(!source){rowNeedsSource=true;continue}
+      actions.push({relativePath:row.relativePath,sourceStorageId:Number(source.mount.storageId),sourceLabel:source.mount.label||source.mount.mountPath,sourceStatus:source.status,targetStorageId:id,targetLabel:target.label||target.mountPath});
+      if(actions.length>=cap)break;
     }
+    if(rowNeedsSource)skippedNoSource+=1;
     if(actions.length>=cap)break;
   }
+  const hashBody=actions.map(x=>[x.relativePath,x.sourceStorageId,x.sourceStatus,x.targetStorageId]);
+  const planHash=createHash('sha256').update(JSON.stringify(hashBody)).digest('hex');
+  return {
+    generatedAt:new Date().toISOString(),previewGeneratedAt:preview?.generatedAt||null,limit:cap,targetStorageIds:[...targetSet],
+    sourcePriority:mounts.map((x,i)=>({rank:i+1,storageId:Number(x.storageId),label:x.label||x.mountPath})),
+    actions,planHash,summary:{actions:actions.length,verifiedSourceActions:actions.filter(x=>x.sourceStatus==='verified').length,unverifiedSourceActions:actions.filter(x=>x.sourceStatus==='unverified').length,blockedIntegrity,skippedRename,skippedNoSource}
+  };
+}
+
+export async function previewReplicaSyncPlan({limit=20,targetStorageIds=[]}={}){
+  const {replica}=await context();if(!replica.enabled)throw err('REPLICA_DISABLED','云盘副本管理尚未启用');if(!replica.allowCopy)throw err('REPLICA_COPY_DISABLED','请先开启“允许副本复制”');
+  return buildReplicaSyncPlan(await currentPreview(),replica,{limit,targetStorageIds});
+}
+
+export async function syncMissingReplicas({limit=20,targetStorageIds=[],planHash=''}={}){
+  const {config,replica}=await context();if(!replica.enabled)throw err('REPLICA_DISABLED','云盘副本管理尚未启用');if(!replica.allowCopy)throw err('REPLICA_COPY_DISABLED','请先开启“允许副本复制”');
+  const preview=await currentPreview();const plan=buildReplicaSyncPlan(preview,replica,{limit,targetStorageIds});
+  if(planHash&&String(planHash)!==plan.planHash)throw err('REPLICA_PLAN_CHANGED','副本状态或来源优先级已变化，请重新预览补齐计划',{expected:plan.planHash,received:String(planHash)});
+  const mountCfg=new Map((replica.mounts||[]).map(x=>[Number(x.storageId),x]));
   const queued=[],failed=[],touched=new Set(),seenDirs=new Set(),metrics=makeMetrics();
-  for(const a of actions){
+  for(const a of plan.actions){
+    const source=mountCfg.get(Number(a.sourceStorageId)),target=mountCfg.get(Number(a.targetStorageId));if(!source||!target)continue;
     try{
-      const src=fullFromRelative(a.source.rootPath,a.relativePath),dst=fullFromRelative(a.target.rootPath,a.relativePath);const srcDir=path.posix.dirname(src),dstDir=path.posix.dirname(dst),name=path.posix.basename(src);
+      const src=fullFromRelative(source.rootPath,a.relativePath),dst=fullFromRelative(target.rootPath,a.relativePath);const srcDir=path.posix.dirname(src),dstDir=path.posix.dirname(dst),name=path.posix.basename(src);
       await ensureDir(config,dstDir,seenDirs,metrics);await openListRequest(config,'/api/fs/copy',{body:{src_dir:srcDir,dst_dir:dstDir,names:[name]},metrics});
-      queued.push({relativePath:a.relativePath,sourceStorageId:a.source.storageId,targetStorageId:a.target.storageId});touched.add(Number(a.target.storageId));
-    }catch(e){failed.push({relativePath:a.relativePath,targetStorageId:a.target.storageId,message:e?.message||'复制失败'})}
+      queued.push({relativePath:a.relativePath,sourceStorageId:source.storageId,targetStorageId:target.storageId,sourceStatus:a.sourceStatus});touched.add(Number(target.storageId));
+    }catch(e){failed.push({relativePath:a.relativePath,sourceStorageId:a.sourceStorageId,targetStorageId:a.targetStorageId,message:e?.message||'复制失败'})}
   }
   if(touched.size)await invalidateReplicaSnapshots(replicaScopeKey(config),[...touched]);
-  return {queued,failed,submitted:actions.length,targetSnapshotsInvalidated:[...touched],apiStats:metrics,note:'OpenList 跨存储复制可能进入后台任务队列；目标盘快照已失效，稍后只刷新目标盘即可确认，不需要全盘重扫。'};
+  return {queued,failed,submitted:plan.actions.length,executedPlanHash:plan.planHash,targetSnapshotsInvalidated:[...touched],apiStats:metrics,note:'OpenList 跨存储复制可能进入后台任务队列；目标盘快照已失效，稍后只刷新目标盘即可确认，不需要全盘重扫。'};
 }
 
 export async function renameReplicaSuggestion({storageId,fromRelative,toRelative}){

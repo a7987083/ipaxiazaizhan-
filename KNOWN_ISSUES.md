@@ -1,16 +1,16 @@
 # Known Issues
 
-## 2026091228 candidate
+## 2026091229 candidate
 
-- Actions #135 / run `34825687295` passed source/build/contracts/package validation, but real BaoTa/OpenList traffic behavior is not yet verified.
-- `per_page:0` reduces ZONOE → OpenList list-call count for large flat directories, but nested replica roots still require one `/api/fs/list` per visited directory. OpenList may also perform provider-side work according to its own cache/driver behavior; ZONOE keeps `refresh:false` and does not explicitly force provider refresh.
-- Persistent replica snapshots live in `CONTROL_DIR/openlist-replica-snapshots.json` and can be large because they retain file metadata for each selected drive/root. TTL is 30 minutes; saving replica configuration clears them.
-- Copy invalidates only target-drive snapshots. OpenList cross-storage copy may be asynchronous, so a target-only refresh performed too early can still show the old state; wait for OpenList background copy to finish and refresh that target again.
-- Rename/quarantine now refresh only affected drives. The resulting reconciliation still rereads the current MySQL expected list and OpenList storage list, but it does not rescan unaffected drive trees.
-- Range Parser `raw_url` traffic bypasses OpenList directory cache. 1228 therefore enforces 10 parse attempts per rolling hour and 150 per UTC day and shows real `range_requests` / `range_bytes` metrics.
-- The 16 MiB per-IPA Range ceiling is intentionally unchanged. Lowering it before collecting real IPA telemetry could increase false parse failures because ZIP central-directory and `Info.plist` access patterns vary.
-- The hourly/daily Range budget counts parse attempts conservatively. A selected item that fails before making a Range request can still consume an attempt while showing zero Range requests/bytes.
-- Same-MD5 metadata reuse depends on a valid 32-hex MD5 and compatible known size. Providers that do not expose MD5 still fall back to the existing size/modified change-detection path and cannot use content-addressed reuse safely.
-- ZONOE 1227/1228 discovers/selects an existing OpenList Alias and guides its configuration; it does not automatically create or mutate Alias storage. Existing MySQL `bt1a` URLs pointing directly to a physical mount still bypass Alias load balancing.
-- Permanent deletion of extra IPA remains unavailable; extras can only be moved to the configured quarantine area when explicitly enabled and confirmed.
-- Real account-switch MD5 reuse, real Alias distribution, real cross-storage copy/rename/quarantine, dynamic MySQL write-back and the new request-profile behavior remain pending production verification unless separately tested.
+- CI for the 1229 candidate is not yet claimed. Source changes must pass integration/build/package validation before deployment is recommended.
+- Integrity verification is only as strong as the expected metadata available to ZONOE. When the metadata cache has a valid expected MD5, equal MD5 is authoritative. When comparable MD5 is unavailable, the file is deliberately marked `unverified`; size alone does not prove identical content.
+- A known size mismatch is treated as an integrity problem when both expected and actual sizes are available. The expected size comes from the OpenList IPA metadata cache, not blindly from a potentially stale database value.
+- MD5/size mismatch files are blocked from automatic source selection and are not automatically overwritten. 1229 intentionally stops at detection/visibility; a later version can add a controlled “quarantine bad copy then refill from verified source” workflow after real validation.
+- Source priority uses the persisted order of selected physical mounts. The admin can move drives up/down. Safety wins over preference: a verified source always outranks an unverified source, even if the unverified drive is ranked higher.
+- Sync planning is a preview, not a copy operation. Execution recomputes the plan and compares the SHA-256 `planHash`; if the action set changed, the backend returns `REPLICA_PLAN_CHANGED` and requires a new preview.
+- The plan hash protects the selected file/source/target action set, but OpenList cross-storage copy can still be asynchronous after submission. A successful `/api/fs/copy` response does not prove the target bytes have finished transferring.
+- Existing 1228 reconciliation previews do not contain the new per-copy integrity states. 1229 therefore does not restore an incompatible old preview as current. Run a new reconciliation after upgrade; the existing 30-minute per-drive directory snapshots may still be reused.
+- Snapshot/listing data can become stale within the configured TTL. Before risky manual remediation of an integrity issue, force-refresh the affected drive rather than relying on an old snapshot.
+- `per_page:0`, targeted refresh, Range Parser budgets, MD5 metadata reuse, Alias behavior, quarantine-only deletion policy and other 1228 safeguards remain unchanged.
+- Real BaoTa/OpenList verification is still required for mismatch detection, source-priority selection, sync-plan preview/execution, stale-plan rejection, 7,000+ file request counts and Range telemetry.
+- ZONOE still does not automatically create/modify OpenList Alias or rewrite MySQL `bt1a` to Alias paths. Direct physical URLs continue to bypass Alias load balancing.
