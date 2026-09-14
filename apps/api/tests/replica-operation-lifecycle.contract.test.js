@@ -38,6 +38,14 @@ describe('replica copy lifecycle and audit',()=>{
     expect(summary).toMatchObject({total:5,active:2,success:1,failed:1,timeout:1,batchesActive:1});
   });
 
+  test('failed-only copy batch does not schedule target refresh',()=>{
+    const store=read('apps/api/src/services/replicaOperationStore.js');
+    expect(store).toContain("const submitted=operations.filter(x=>x.status==='submitted')");
+    expect(store).toContain('targetStorageIds:submitted.map(x=>x.targetStorageId)');
+    expect(store).toContain('x.targetStorageIds.length>0');
+    expect(store).toContain("status:submitted.length?'submitted':'failed'");
+  });
+
   test('copy lifecycle is persisted, restart-resumable and target-scoped',()=>{
     const store=read('apps/api/src/services/replicaOperationStore.js');
     const service=read('apps/api/src/services/openListReplicaService.js');
