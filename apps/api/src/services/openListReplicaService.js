@@ -291,6 +291,16 @@ export async function previewReplicaSyncPlan({limit=20,targetStorageIds=[]}={}){
   return buildReplicaSyncPlan(await currentPreview(),replica,{limit,targetStorageIds});
 }
 
+function mismatchVerificationResult(operation,verification,message,now){
+  const previous=Date.parse(String(operation?.mismatchSince||''));
+  const mismatchStartedAt=Number.isFinite(previous)?previous:now;
+  const mismatchSince=new Date(mismatchStartedAt).toISOString();
+  if(Math.max(0,now-mismatchStartedAt)<COPY_MISMATCH_CONFIRM_MS){
+    return {status:'verifying',verification:`${verification}_pending`,message:`${message}；等待最终一致性`,mismatchSince};
+  }
+  return {status:'failed',verification,message,mismatchSince};
+}
+
 export function evaluateReplicaCopyVerification(operation,actual,now=Date.now()){
   const started=Date.parse(String(operation?.submittedAt||operation?.createdAt||''));
   const elapsed=Number.isFinite(started)?Math.max(0,now-started):0;
@@ -298,24 +308,22 @@ export function evaluateReplicaCopyVerification(operation,actual,now=Date.now())
   const expectedMd5=String(operation?.expectedMd5||'').toUpperCase();
   const expectedSize=Number(operation?.expectedSize||0);
   if(!actual){
-    if(expired)return {status:'timeout',verification:'not_found',message:'复制验证超时：目标文件仍未出现'};
-    return {status:'waiting',verification:'waiting',message:'等待 OpenList/网盘完成复制'};
+    if(expired)return {status:'timeout',verification:'not_found',message:'复制验证超时：目标文件仍未出现',mismatchSince:operation?.mismatchSince||null};
+    return {status:'waiting',verification:'waiting',message:'等待 OpenList/网盘完成复制',mismatchSince:operation?.mismatchSince||null};
   }
   const actualMd5=String(actual?.md5||'').toUpperCase();
   const actualSize=Number(actual?.size||0);
   if(expectedMd5&&actualMd5&&expectedMd5!==actualMd5){
-    if(elapsed<COPY_MISMATCH_CONFIRM_MS)return {status:'verifying',verification:'md5_mismatch_pending',message:'目标文件已出现，但 MD5 暂不一致；等待最终一致性'};
-    return {status:'failed',verification:'md5_mismatch',message:'复制后 MD5 与期望不一致'};
+    return mismatchVerificationResult(operation,'md5_mismatch','复制后 MD5 与期望不一致',now);
   }
   if(expectedSize>0&&actualSize>0&&expectedSize!==actualSize){
-    if(elapsed<COPY_MISMATCH_CONFIRM_MS)return {status:'verifying',verification:'size_mismatch_pending',message:'目标文件已出现，但大小暂不一致；等待最终一致性'};
-    return {status:'failed',verification:'size_mismatch',message:'复制后文件大小与期望不一致'};
+    return mismatchVerificationResult(operation,'size_mismatch','复制后文件大小与期望不一致',now);
   }
-  if(expectedMd5&&actualMd5&&expectedMd5===actualMd5)return {status:'success',verification:'md5',message:'复制完成，MD5 一致'};
-  if(expectedSize>0&&actualSize===expectedSize)return {status:'success',verification:expectedMd5?'size_only_no_hash':'size',message:expectedMd5?'复制完成；目标驱动未返回 MD5，文件大小一致':'复制完成，文件大小一致'};
-  if(actualSize>0||actualMd5)return {status:'success',verification:'presence_only',message:'复制完成；缺少可比较的期望 Hash/大小'};
-  if(expired)return {status:'timeout',verification:'incomplete_metadata',message:'目标条目已出现，但验证信息持续不完整'};
-  return {status:'verifying',verification:'incomplete_metadata',message:'目标条目已出现，等待验证信息'};
+  if(expectedMd5&&actualMd5&&expectedMd5===actualMd5)return {status:'success',verification:'md5',message:'复制完成，MD5 一致',mismatchSince:null};
+  if(expectedSize>0&&actualSize===expectedSize)return {status:'success',verification:expectedMd5?'size_only_no_hash':'size',message:expectedMd5?'复制完成；目标驱动未返回 MD5，文件大小一致':'复制完成，文件大小一致',mismatchSince:null};
+  if(actualSize>0||actualMd5)return {status:'success',verification:'presence_only',message:'复制完成；缺少可比较的期望 Hash/大小',mismatchSince:null};
+  if(expired)return {status:'timeout',verification:'incomplete_metadata',message:'目标条目已出现，但验证信息持续不完整',mismatchSince:null};
+  return {status:'verifying',verification:'incomplete_metadata',message:'目标条目已出现，等待验证信息',mismatchSince:null};
 }
 
 function permanentVerificationError(e){
@@ -370,7 +378,7 @@ export async function verifyReplicaOperationsNow({limit=COPY_VERIFY_BATCH}={}){
       const done=terminalOperationStatus(result.status);if(done)terminal+=1;
       const patch={
         id:operation.id,status:result.status,verification:result.verification,message:result.message,error:done&&result.status!=='success'?(verifyError||result.message):verifyError,
-        attempts:Number(operation.attempts||0)+1,lastCheckedAt:new Date(now).toISOString(),actualMd5:String(actual?.md5||operation.actualMd5||''),actualSize:Number(actual?.size||operation.actualSize||0),completedAt:done?new Date(now).toISOString():null
+        attempts:Number(operation.attempts||0)+1,lastCheckedAt:new Date(now).toISOString(),mismatchSince:result.mismatchSince??null,actualMd5:String(actual?.md5||operation.actualMd5||''),actualSize:Number(actual?.size||operation.actualSize||0),completedAt:done?new Date(now).toISOString():null
       };
       updates.push(patch);
       if(done)audits.push({

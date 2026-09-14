@@ -10,15 +10,25 @@ const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const started='2026-09-15T00:00:00.000Z';
 const base={submittedAt:started,createdAt:started,expectedMd5:'A'.repeat(32),expectedSize:1024};
 const t=ms=>Date.parse(started)+ms;
+const iso=ms=>new Date(t(ms)).toISOString();
 
 describe('replica copy lifecycle and audit',()=>{
   test('copy verification prefers MD5 and records a verified success',()=>{
-    expect(evaluateReplicaCopyVerification(base,{md5:'A'.repeat(32),size:1024},t(5_000))).toMatchObject({status:'success',verification:'md5'});
+    expect(evaluateReplicaCopyVerification(base,{md5:'A'.repeat(32),size:1024},t(5_000))).toMatchObject({status:'success',verification:'md5',mismatchSince:null});
   });
 
-  test('mismatch is given a short consistency window before terminal failure',()=>{
-    expect(evaluateReplicaCopyVerification(base,{md5:'B'.repeat(32),size:1024},t(COPY_MISMATCH_CONFIRM_MS-1))).toMatchObject({status:'verifying',verification:'md5_mismatch_pending'});
-    expect(evaluateReplicaCopyVerification(base,{md5:'B'.repeat(32),size:1024},t(COPY_MISMATCH_CONFIRM_MS+1))).toMatchObject({status:'failed',verification:'md5_mismatch'});
+  test('mismatch grace starts when the mismatch is first observed, not when copy was submitted',()=>{
+    const firstSeenAt=2*60*1000;
+    const first=evaluateReplicaCopyVerification(base,{md5:'B'.repeat(32),size:1024},t(firstSeenAt));
+    expect(first).toMatchObject({status:'verifying',verification:'md5_mismatch_pending',mismatchSince:iso(firstSeenAt)});
+    const tracked={...base,mismatchSince:first.mismatchSince};
+    expect(evaluateReplicaCopyVerification(tracked,{md5:'B'.repeat(32),size:1024},t(firstSeenAt+COPY_MISMATCH_CONFIRM_MS-1))).toMatchObject({status:'verifying',verification:'md5_mismatch_pending',mismatchSince:first.mismatchSince});
+    expect(evaluateReplicaCopyVerification(tracked,{md5:'B'.repeat(32),size:1024},t(firstSeenAt+COPY_MISMATCH_CONFIRM_MS+1))).toMatchObject({status:'failed',verification:'md5_mismatch',mismatchSince:first.mismatchSince});
+  });
+
+  test('resolved mismatch clears the mismatch marker',()=>{
+    const operation={...base,mismatchSince:iso(20_000)};
+    expect(evaluateReplicaCopyVerification(operation,{md5:'A'.repeat(32),size:1024},t(40_000))).toMatchObject({status:'success',verification:'md5',mismatchSince:null});
   });
 
   test('missing target waits and then times out',()=>{
@@ -27,7 +37,7 @@ describe('replica copy lifecycle and audit',()=>{
   });
 
   test('provider without target hash is explicitly downgraded to size-only verification',()=>{
-    expect(evaluateReplicaCopyVerification(base,{md5:'',size:1024},t(20_000))).toMatchObject({status:'success',verification:'size_only_no_hash'});
+    expect(evaluateReplicaCopyVerification(base,{md5:'',size:1024},t(20_000))).toMatchObject({status:'success',verification:'size_only_no_hash',mismatchSince:null});
   });
 
   test('operation summary distinguishes active/success/failure/timeout',()=>{
@@ -53,9 +63,11 @@ describe('replica copy lifecycle and audit',()=>{
     expect(store).toContain('openlist-replica-operations.json');
     expect(store).toContain('mode:0o600');
     expect(store).toContain('getPendingReplicaCopyOperations');
+    expect(store).toContain('mismatchSince:x.mismatchSince||null');
     expect(service).toContain("'/api/fs/get'");
     expect(service).toContain("'/api/fs/list'");
     expect(service).toContain('scope_changed');
+    expect(service).toContain('mismatchSince:result.mismatchSince??null');
     expect(service).toContain('previewReplicas({forceRefresh:true,storageIds})');
     expect(service).toContain('trackingBatchId');
     expect(server).toContain('startReplicaOperationVerifier');
