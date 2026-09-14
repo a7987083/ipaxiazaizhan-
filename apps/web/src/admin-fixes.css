@@ -31,4 +31,7 @@
 }
 @media(max-width:760px){
   .form-grid label:has(input[type="checkbox"]){padding-top:4px;min-height:38px}
+  /* 1232: 11 admin entries still fit in two fixed bottom-nav rows. */
+  .admin-shell{padding-bottom:96px}
+  .admin-shell aside{grid-template-columns:repeat(6,1fr)}
 }
