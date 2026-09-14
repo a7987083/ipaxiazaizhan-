@@ -2,57 +2,39 @@
 
 - Repo: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
-- Candidate: `2026091231`
-- Baseline: `2026091230` / `cbbe8065db127619353d4ff2eecbdd2f144bf0f0`
-- Functional code: `4f574815d9ad2fba94ef910f5c2904f19c3937d9`
-- Release commit: `c6a4991a93752b76fcd998da007ae95e15ede25a`
-- Functional CI: Actions #156 / run `34852734004` passed validation and package jobs.
-- Release CI: Actions #157 / run `34853328149` passed validation and package jobs.
-- Deployment artifact: `zonoe-ipa-download-2026091231-baota-native-build` / sha256 `f2abbe1ab848dbd46df4bcd72dd0b0dbfa3e266b01544cf82773005c85b1d56c`.
-- Real BaoTa/OpenList 1231 recheck: pending.
+- Candidate: `2026091232`
+- Baseline: `2026091231` / `3a8f6dd63b1cee43bf2e3e70454b4ba5dfa35392`
+- Functional head before documentation sync: `84501078d2238080bc7ca32e97599f21e5992c66`
+- Latest Actions: run `34875645903` / run #14 = `startup_failure`, with no jobs created.
+- Deployment artifact: none for 1232 yet.
+- Real BaoTa/OpenList 1232 E2E: pending.
 
-## What 1231 changes
+## What 1232 changes
 
-1. Removes the old global Range Parser hard caps of 10 parse attempts/hour and 150/day. Scheduled/manual parsing is no longer shrunk by an hourly/daily remaining-quota calculation.
-2. Range Parser remains single-concurrency sequential. Existing per-run validation stays 1–20 IPA and schedule interval validation stays 5–1440 minutes.
-3. Range usage remains fully metered. `openlist-range-usage.json` continues to retain parse attempts, success/failure, Range request count and real bytes read; the data is now telemetry only, not a quota gate.
-4. The admin Range summary now shows plain totals: `本小时`, `今日`, `今日 Range 请求`, `今日真实读取`. `/10`, `/150`, “剩余额度” and “预算拦截” are removed.
-5. Schedule save/sync copy no longer claims a 10/hour or 150/day protection that no longer exists. The recommended default remains 15 minutes / 1 IPA, but saved 5–1440 minute / 1–20 IPA values are authoritative.
-6. Desktop admin navigation is now sticky: the left menu stays visible while long pages scroll. It uses a full-viewport sidebar with its own overflow when needed.
-7. The mobile admin navigation remains the existing fixed bottom menu; mobile CSS explicitly resets desktop sticky properties.
-8. 1230 replica preview persistence and the independent 30-minute per-drive snapshot cache are preserved unchanged.
+1. OpenList `/api/fs/copy` acceptance is no longer treated as copy completion. Every planned copy is persisted in `CONTROL_DIR/openlist-replica-operations.json` and tracked through `submitted / waiting / verifying / success / failed / timeout`.
+2. The copy verifier starts with the API service, resumes unfinished work after restart, runs serially every 15 seconds and supports an explicit admin “立即核验复制任务” action.
+3. Target verification prefers MD5. If the target driver does not expose MD5, the result is explicitly downgraded to size-only verification; when no expected comparator exists, the UI labels presence-only confirmation instead of pretending MD5 verification happened.
+4. A copy that never appears reaches timeout after 10 minutes. MD5/size mismatches are surfaced as failures rather than being counted as success.
+5. Sync-plan SHA-256 now includes source/target roots plus expected MD5/size, so a stale plan is rejected when expected content or copy roots change.
+6. Copy submission returns a tracking batch ID. The admin now has a dedicated “副本任务” page showing recent batches, per-IPA state, verification result, actual MD5/size, attempts and operation audit.
+7. Copy verification, target refresh, rename and quarantine actions are written to the operation audit. Tokens, raw URLs and IPA direct-download URLs are not stored in the audit file.
+8. When a batch reaches a terminal state, ZONOE invalidates and refreshes only the affected target drives. A batch where every copy submission failed now has no target-refresh list and is not scheduled for a pointless refresh.
+9. Existing 1229 integrity/source-priority/stale-plan rules, 1230 reconciliation persistence/30-minute drive snapshots, and 1231 Range telemetry-only/scheduler/sidebar behavior remain intact.
 
-## Why the Range cap was removed
+## Verification state
 
-Production observation showed typical parses using about 2 Range requests and less than 1 MiB of real read traffic per IPA. Under that observed profile, the old attempt-count caps were more conservative than necessary and also made administrator-defined scheduling misleading. 1231 therefore keeps the low-risk controls that map directly to load—single concurrency, per-run maximum, measured requests/bytes—while removing the fixed hourly/daily attempt quota.
+The source and contract coverage for 1232 are committed, including tests for MD5 verification, mismatch handling, timeout, no-hash size fallback, lifecycle status aggregation, restart-resume wiring, tracking APIs/UI, plan binding, and failed-only batches not scheduling target refresh.
 
-## CI verification
+GitHub Actions is **not green or red at the test level yet**. For every 1232 push GitHub creates a workflow run and immediately ends it as `startup_failure` before any job exists. Latest observed run: `34875645903`; job list is empty, so integration tests, production build, smoke tests and package jobs have not executed. A retry request for the startup-failed run is also rejected by GitHub. Treat this as an external CI-startup blocker, not as a source-test result.
 
-Actions #156 / run `34852734004` validated the functional code. Actions #157 / run `34853328149` validated the versioned 2026091231 release tree and package. Both passed:
-- Integration tests
-- Range telemetry-only contracts
-- scheduler configuration contracts
-- admin sticky-sidebar contract
-- Production build
-- Native API smoke
-- Native frontend static smoke
-- Shell validation
-- BaoTa native contract
-- MySQL multi-source contract
-- GitHub updater contract
-- Legacy Docker compose syntax
-- deployment package build/validation/artifact upload
+## Required next steps
 
-`release-e2e` remains skipped by workflow condition, so real BaoTa/OpenList 1231 behavior still needs the short recheck below.
+1. Restore GitHub Actions so a workflow job can actually start, then require the normal integration/build/smoke/BaoTa/package pipeline to pass before calling 1232 release-ready.
+2. Confirm a 1232 deployment package is produced and validated; do not reuse the 1231 artifact as proof for 1232.
+3. Deploy to real BaoTa/OpenList and execute only a small safe 1–5 IPA copy plan.
+4. Confirm the admin task lifecycle progresses from submission to a terminal state and the target file is checked by MD5 when the provider exposes it.
+5. Restart the Node service while a safe copy is pending and confirm unfinished operations resume from the persisted operation store.
+6. Confirm terminal batches refresh only their actual target drives; a failed-only submission batch must not trigger target refresh.
+7. Confirm audit entries exist for copy batch, copy verification, target refresh, rename and quarantine, and that no secret token/raw URL is persisted.
 
-## Recommended real recheck
-
-After upgrading to 2026091231:
-
-1. Save a non-default schedule such as `5 minutes / 5 IPA`, reload the page, and confirm the same values return without a server error.
-2. Confirm Range usage shows plain totals such as `本小时 9` and `今日 22`; there must be no `/10`, `/150` or remaining-quota row.
-3. Trigger a manual/scheduled parse when the historical hour/day counts are already above the former limits and confirm parsing still follows the requested per-run count (subject only to available eligible IPA and the 1–20 per-run validation).
-4. Scroll a long desktop admin page and confirm the left navigation remains visible. On mobile, confirm the bottom navigation still behaves as before.
-5. Recheck the 1230 replica cache fix: reconcile once, navigate away/back, then run “对账（优先快照）” inside 30 minutes and confirm persisted preview/snapshot reuse.
-
-Real Alias distribution, cross-storage copy completion, mismatch remediation and controlled MySQL `bt1a` migration remain separate production-verification items.
+Alias load balancing, controlled mismatch remediation and MySQL `bt1a` -> Alias migration remain later production phases; 1232 does not mass rewrite download URLs or automatically overwrite mismatch targets.
