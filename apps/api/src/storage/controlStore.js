@@ -64,6 +64,7 @@ function normalizeReplicaConfig(input={}) {
     allowCopy:input?.allowCopy===true,
     allowRename:input?.allowRename===true,
     allowQuarantine:input?.allowQuarantine===true,
+    allowRepair:input?.allowRepair===true,
     quarantineFolder:String(input?.quarantineFolder||'.zonoe-quarantine').trim().replace(/[\\/]+/g,'-').slice(0,120)||'.zonoe-quarantine',
     aliasMountPath:input?.aliasMountPath?cleanOpenListPath(input.aliasMountPath):'',
     mounts:mounts.map(x=>({
