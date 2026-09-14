@@ -8,7 +8,7 @@ let writeQueue=Promise.resolve();
 function normalize(value){
   if(!value||typeof value!=='object')return null;
   return {
-    version:1,
+    version:2,
     generatedAt:value.generatedAt||null,
     expectedCount:Number(value.expectedCount||0),
     mounts:Array.isArray(value.mounts)?value.mounts:[],
@@ -16,7 +16,9 @@ function normalize(value){
     ignoredDatabaseRefs:Number(value.ignoredDatabaseRefs||0),
     sourceErrors:Array.isArray(value.sourceErrors)?value.sourceErrors:[],
     alias:value.alias||null,
-    permissions:value.permissions||{}
+    permissions:value.permissions||{},
+    apiStats:value.apiStats||{},
+    snapshotTtlMinutes:Number(value.snapshotTtlMinutes||30)
   };
 }
 
