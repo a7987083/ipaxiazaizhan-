@@ -48,18 +48,24 @@ describe('controlled replica mismatch remediation',()=>{
     const refill=service.indexOf("type:'repair_refill'");
     expect(service).toContain("replicaIntegrityStatus(expected,sourceActual)!=='verified'");
     expect(service).toContain("['md5_mismatch','size_mismatch'].includes(liveTargetStatus)");
+    expect(service).toContain("'/api/fs/rename'");
     expect(service).toContain("'/api/fs/move'");
     expect(service).toContain("'/api/fs/copy'");
+    expect(service.indexOf("'/api/fs/rename'")).toBeLessThan(service.indexOf("'/api/fs/copy'"));
     expect(move).toBeGreaterThan(-1);
     expect(refill).toBeGreaterThan(move);
     expect(service).toContain('permanentDelete:false');
     expect(service).not.toContain("'/api/fs/remove'");
   });
 
-  test('repair quarantine prefers the storage mount root so managed subfolders stay clean',()=>{
+  test('repair quarantine uses synchronous rename before async move/copy and prefers the storage mount root',()=>{
     const service=read('apps/api/src/services/replicaRepairService.js');
     expect(service).toContain('const quarantineBase=cleanPath(target.mountPath||a.targetMountPath||target.rootPath)');
     expect(service).toContain("replica.quarantineFolder,'repair'");
+    expect(service).toContain('Current OpenList /api/fs/move returns after scheduling an async task');
+    expect(service).toContain('refresh:true');
+    expect(service).toContain('repair_quarantine_move');
+    expect(service).toContain('.quarantine`');
   });
 
   test('admin requires explicit repair permission and exposes preview-before-execute flow',()=>{
