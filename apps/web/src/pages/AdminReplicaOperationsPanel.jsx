@@ -8,7 +8,7 @@ function statusText(status){
 function verificationText(v){
   return ({md5:'MD5 一致',size:'大小一致',size_only_no_hash:'大小一致（目标盘未返回 MD5）',presence_only:'仅确认文件存在',md5_mismatch:'MD5 不一致',size_mismatch:'大小不一致',scope_changed:'OpenList 配置已变化',api_permission_error:'OpenList 权限错误',not_found:'目标未出现',waiting:'等待目标文件',incomplete_metadata:'等待验证信息'})[v]||v||'—';
 }
-function auditText(type){return ({copy_batch:'复制批次',copy_verify:'复制核验',copy_target_refresh:'目标盘刷新',rename:'名称修复',quarantine:'隔离'})[type]||type||'操作';}
+function auditText(type){return ({copy_batch:'复制批次',copy_verify:'复制核验',copy_target_refresh:'目标盘刷新',repair_quarantine:'修复隔离',repair_refill:'修复补回',repair_precheck:'修复前检查',repair_target_refresh:'修复后刷新',rename:'名称修复',quarantine:'隔离'})[type]||type||'操作';}
 function timeText(v){try{return v?new Date(v).toLocaleString():'—'}catch{return '—'}}
 
 export default function AdminReplicaOperationsPanel(){
@@ -31,6 +31,6 @@ export default function AdminReplicaOperationsPanel(){
 
     <div className="admin-panel"><h3>最近复制明细</h3>{ops.length===0?<p>暂无复制明细。</p>:<div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse'}}><thead><tr><th align="left">IPA</th><th align="left">来源 → 目标</th><th align="left">状态</th><th align="left">校验</th><th align="left">实际信息</th><th align="left">最后检查</th></tr></thead><tbody>{ops.slice(0,100).map(x=><tr key={x.id} style={{borderTop:'1px solid #e5e7eb',verticalAlign:'top'}}><td style={{padding:8,wordBreak:'break-all'}}>{x.relativePath}</td><td style={{padding:8}}>{x.sourceLabel||`#${x.sourceStorageId}`} → {x.targetLabel||`#${x.targetStorageId}`}</td><td style={{padding:8}}><b>{statusText(x.status)}</b>{x.error?<><br/><small>{x.error}</small></>:null}</td><td style={{padding:8}}>{verificationText(x.verification)}<br/><small>{x.message||''}</small></td><td style={{padding:8}}><small>{x.actualMd5?`MD5 ${x.actualMd5}`:'MD5 —'}<br/>{x.actualSize?fmtBytes(x.actualSize):'大小 —'}</small></td><td style={{padding:8}}>{timeText(x.lastCheckedAt)}<br/><small>检查 {x.attempts||0} 次</small></td></tr>)}</tbody></table></div>}</div>
 
-    <div className="admin-panel"><h3>最近操作审计</h3><p>这里记录副本复制批次、复制核验、目标盘自动刷新，以及名称修复和隔离操作；不会保存 OpenList Token、raw_url 或 IPA 下载直链。</p>{audit.length===0?<p>暂无审计记录。</p>:audit.slice(0,100).map(x=><div className="row" key={x.id}><span>{timeText(x.at)} · <b>{auditText(x.type)}</b>{x.relativePath?<><br/><small style={{wordBreak:'break-all'}}>{x.relativePath}</small></>:null}{x.message?<><br/><small>{x.message}</small></>:null}</span><b>{statusText(x.status)}</b></div>)}</div>
+    <div className="admin-panel"><h3>最近操作审计</h3><p>这里记录副本复制/异常修复、复制核验、目标盘自动刷新，以及异常隔离、补回、名称修复和普通隔离操作；不会保存 OpenList Token、raw_url 或 IPA 下载直链。</p>{audit.length===0?<p>暂无审计记录。</p>:audit.slice(0,100).map(x=><div className="row" key={x.id}><span>{timeText(x.at)} · <b>{auditText(x.type)}</b>{x.relativePath?<><br/><small style={{wordBreak:'break-all'}}>{x.relativePath}</small></>:null}{x.message?<><br/><small>{x.message}</small></>:null}</span><b>{statusText(x.status)}</b></div>)}</div>
   </div>;
 }
