@@ -2,30 +2,34 @@
 
 - Repo: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
-- Candidate: `2026091227`
-- Baseline: `2026091226` / `a1177c9ff6ed16e22924c38b73749ec720165709`
-- Functional/test commit: `365d1b5b2c13fd531dd4bf544012dc621353f4f1`
-- Functional CI: Actions #117 / run `34790323206` passed validation and package jobs.
-- Real BaoTa/OpenList Alias/load-balancing verification: pending.
+- Candidate: `2026091228`
+- Baseline: `2026091227` / `3b9e769f8f85cbd7f930ec9a577609c426bea573`
+- Functional/test commit: `23d44dda05de0e170cb5dda69be16d1b2db205c6`
+- Version commit: `af40fecd1dc6049788673389fbc16dd1046fe94e`
+- Functional CI: Actions #135 / run `34825687295` completed successfully.
+- Real BaoTa/OpenList request-profile verification: pending.
 
-## What 1227 changes
+## What 1228 changes
 
-1. Multi-drive reconciliation results are no longer browser-only state. They are persisted to `CONTROL_DIR/openlist-replica-preview.json` and restored when the admin leaves the page, comes back, refreshes the browser, or the Node process restarts.
-2. Saving/changing replica configuration explicitly invalidates the old persisted reconciliation result so stale drive/root results are not shown as current.
-3. Every drive result can be expanded/collapsed, with global “全部展开 / 全部收起”. With multiple drives only the first result opens initially.
-4. Extra IPA are automatically listed as “多余 IPA”; the old redundant wording “数据库不存在的多余 IPA” is removed. Extra and missing lists paginate at 100 rows per page instead of silently truncating the list.
-5. Alias distribution is presented as a real setup flow instead of a raw path field. ZONOE discovers existing OpenList Alias mounts, lets the admin choose one, shows/copies all selected replica roots that belong in the Alias, and calculates the Alias public download root.
-6. The UI explains the actual distribution path: create/edit Alias in OpenList, add all replica roots, select “按文件负载均衡”, save it, select that Alias in ZONOE, reconcile replicas, and then use the Alias `/d/<alias>/...` public path for downloads.
-7. Important: ZONOE 1227 does not automatically create/modify the OpenList Alias and does not automatically rewrite existing MySQL `bt1a` values to the Alias. Direct physical URLs such as `/d/a/app/...` bypass the Alias and therefore do not participate in load balancing.
-8. The IPA metadata page now calls the credential “OpenList 令牌”, specifically pointing to OpenList 设置 → 其他 → 令牌. Backend authentication remains the correct raw `Authorization` token value.
+1. Metadata and replica directory scans now use OpenList `/api/fs/list` with `per_page:0` and `refresh:false`, eliminating 500-row pagination. A flat 7,271-file directory normally changes from about 15 ZONOE→OpenList list calls to one call.
+2. Metadata directory cache remains 30 minutes and now includes a SHA-256 fingerprint of the OpenList token in its scope identity, preventing an account/token change from reusing another account's cached listing.
+3. New persistent per-drive replica snapshots live at `CONTROL_DIR/openlist-replica-snapshots.json` with a 30-minute TTL. Normal reconciliation reuses them; admin can force-refresh all drives or only one drive.
+4. Replica copy no longer starts with an unconditional all-drive rescan. It uses the latest valid reconciliation/snapshots, invalidates only target-drive snapshots, and tells the admin to refresh only those targets after OpenList background copy finishes.
+5. Rename and quarantine validate against the latest usable reconciliation, then invalidate and refresh only affected drives rather than scanning every drive before and after each action.
+6. Batch destination-directory creation is deduplicated within the operation so 20 files going to the same directory do not repeatedly issue the same mkdir chain.
+7. Replica UI shows OpenList request count, snapshot hits, actual drive rescans, snapshot age, “只刷新这个盘”, and “补齐此盘缺失（20 个）”.
+8. Range Parser now reports both `range_bytes` and `range_requests`; partial metrics are also returned on parser errors.
+9. Range usage is persisted at `CONTROL_DIR/openlist-range-usage.json`. Hard limits are 10 parse attempts per rolling hour and 150 per UTC day. Scheduled parsing is effectively no faster than one IPA every 15 minutes and remains sequential/single-concurrency.
+10. Core metadata sync consults the MD5 metadata library before parse candidate selection. Same-MD5 copies reuse metadata immediately; within one task a successful parse is propagated to other same-MD5 copies instead of re-reading each raw URL.
+11. The legacy one-second metadata-persistence reconciliation loop is reduced to 30 seconds because core sync now performs immediate MD5 reuse itself.
+12. The 16 MiB per-IPA Range ceiling is intentionally unchanged until real request/byte telemetry shows a lower ceiling is safe.
 
 ## CI verification
 
-Actions #116 initially failed only because the 1226 regression test pinned the exact version string `2026091226`; all newly added replica UX tests had already passed in that run. The stale version assertion was changed to require 1226-or-newer without weakening the account-switch behavior test.
-
-Actions #117 / run `34790323206` then passed:
+Actions #135 / run `34825687295` passed:
 - Integration tests
-- replica reconciliation/UX contracts
+- API scheduling / Range budget contract tests
+- replica reconciliation contracts
 - account-switch regression contracts
 - Production build
 - Native API smoke
@@ -34,12 +38,15 @@ Actions #117 / run `34790323206` then passed:
 - BaoTa native contract
 - MySQL multi-source contract
 - GitHub updater contract
-- deployment package build/validation/artifact upload
+- Legacy Docker compose syntax
+- deployment package build/validation
 
-`release-e2e` remains skipped by workflow condition, so real BaoTa/OpenList behavior is not yet claimed as verified.
+This is source/build/contract verification only. Real BaoTa/OpenList traffic behavior is not yet claimed as production-verified.
 
 ## Recommended real validation
 
-Deploy 2026091227. Run one multi-drive reconciliation, note the counts, switch to another admin page and return; the same result and timestamp should still be present. Verify a drive with >100 extras shows pagination and that drive cards can be collapsed. In OpenList create or edit an Alias with all selected replica roots and choose “按文件负载均衡”; return to ZONOE, select that Alias, save, and verify coverage is complete. Test one IPA using the generated Alias public download root before considering any batch change of MySQL `bt1a` download URLs.
+Deploy 2026091228. First force-refresh all selected replica drives once to seed fresh snapshots. Immediately run a normal reconciliation and confirm most/all drives show snapshot hits and the OpenList request count drops sharply. Then use “只刷新这个盘” on one drive and verify only that drive reports a real rescan. Submit a small cross-storage copy and verify only target snapshots are invalidated.
 
-The 1226 MD5-addressed metadata persistence remains active. Real account-switch and real multi-drive copy/rename/quarantine verification are still pending if not yet performed on the production server.
+For metadata, run the cached MD5 scan first. Parse one IPA and confirm the admin page records both Range requests and bytes. Verify same-MD5 copies do not parse again. Do not lower the 16 MiB per-file ceiling until enough real samples exist. Finally verify the 10/hour and 150/day guards stop additional raw-url parsing when exhausted.
+
+The 1226 MD5-addressed account-switch protection and 1227 persisted reconciliation/Alias UX remain active. Real Alias load-balancing, real account-switch reuse, and real cross-storage copy/rename/quarantine E2E remain pending unless separately verified on the production server.
