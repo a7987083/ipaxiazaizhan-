@@ -1,20 +1,20 @@
 # Known Issues
 
-## 2026091231 candidate
+## 2026091232 candidate
 
-- Functional Actions #156 / run `34852734004` and release Actions #157 / run `34853328149` both passed source tests, production build, smoke/contracts, deployment package validation and artifact upload. Real BaoTa/OpenList 1231 behavior is still pending production verification.
-- The old fixed Range Parser limits of 10 parse attempts/hour and 150/day are removed in 1231. The usage store is telemetry-only and no longer returns or enforces remaining quota.
-- Scheduled parsing still validates interval 5–1440 minutes and per-run count 1–20. Manual parsing still uses the existing API per-run maximum. These per-run bounds are not the removed hourly/daily quota.
-- Parsing remains single-concurrency sequential. 1231 intentionally does not add parser parallelism; this keeps request bursts controlled while allowing the administrator's saved schedule to run without a second hidden quota.
-- Range request counts and real bytes read are still persisted. Production should continue watching request frequency, bytes, 403/429 and provider-specific errors before increasing schedule aggressiveness substantially.
-- The Range usage UI now displays plain `本小时` and `今日` parse totals plus `今日 Range 请求` and `今日真实读取`. `/10`, `/150`, “剩余额度” and “预算拦截” are intentionally removed.
-- Desktop admin navigation uses `position: sticky`, full viewport height and its own vertical overflow. On mobile the existing fixed bottom navigation overrides `top/height/overflow/align-self` so the desktop rule must not leak into the mobile layout.
-- 1230's replica preview persistence fix remains active. A preview produced by buggy 1229 can still require one fresh reconciliation because it lacked `replicaSchemaVersion`; once rebuilt, navigation/reload persistence should work.
-- Per-drive directory snapshots still expire after 30 minutes. “对账（优先快照）” should reuse fresh snapshots; “强制刷新全部” and “只刷新这个盘” intentionally bypass the relevant snapshot cache.
-- The OpenList storage/mount discovery list itself is still requested from the OpenList admin API when the replica manager state is loaded. The high-cost IPA tree is the part protected by persisted per-drive snapshots.
-- Integrity verification is only as strong as the expected metadata available to ZONOE. When the metadata cache has a valid expected MD5, equal MD5 is authoritative; when comparable MD5 is unavailable, the file remains `unverified`.
-- MD5/size mismatch files remain blocked from automatic source selection and are not automatically overwritten. Controlled mismatch remediation is still a future workflow.
-- Sync-plan execution still recomputes the SHA-256 `planHash`; if source/target choices changed, `REPLICA_PLAN_CHANGED` requires a new preview.
-- OpenList cross-storage copy may be asynchronous after `/api/fs/copy` accepts a task. A successful submission still does not prove target bytes have finished transferring.
-- Real BaoTa/OpenList verification is still required for 1231 schedule persistence, parsing above the former thresholds, Range totals, sticky desktop navigation, 1230 replica preview restore/snapshot hits, 1229 integrity/source-priority behavior, Alias load balancing and copy/rename/quarantine E2E.
+- 1232 source implementation is committed, but GitHub Actions is currently blocked before test execution. The latest checked run `34875645903` ended `startup_failure` and created zero jobs. Therefore integration tests, production build, smoke/contracts, package validation and artifact upload are **not** currently proven for the 1232 tree.
+- Retrying the startup-failed workflow run is rejected by GitHub. This is treated as an external CI-startup blocker, not as a passing or failing source-test result.
+- There is no valid 1232 deployment artifact yet. The existing 1231 artifact must not be presented as a 1232 build.
+- OpenList `/api/fs/copy` may be asynchronous. 1232 fixes the previous visibility gap by persisting copy lifecycle state and independently verifying the target; however this new lifecycle still requires real OpenList provider E2E before production verification.
+- Copy verification prefers expected/actual MD5 equality. If a target driver does not return MD5, 1232 explicitly downgrades success to size-only verification when size is comparable; when neither expected MD5 nor expected size is comparable, only file-presence confirmation is possible.
+- Missing target files time out after 10 minutes. A provider whose asynchronous copy routinely exceeds this window would produce a timeout that needs operator review; 1232 does not automatically retry the original copy submission after timeout.
+- MD5/size mismatch targets remain blocked from automatic overwrite. 1232 observes and audits copy results but does not yet implement controlled mismatch remediation. The planned later flow is explicit quarantine -> refill from a verified source -> re-verify, with no permanent delete.
+- Target-drive refresh is intentionally scoped. Only batches with at least one copy request actually accepted by OpenList retain target storage IDs for post-batch refresh; a failed-only batch is audited as failed and does not schedule a pointless target refresh.
+- The operation store is bounded to recent history (200 batches / 2000 operations / 2000 audit events). It is an operational audit trail, not an unlimited compliance archive.
+- Changing OpenList URL/token changes the replica scope. Pending tasks from an old scope are failed/skipped rather than verified against the new account.
+- The plan hash now binds relative path, source/target IDs and roots, source verification state, expected MD5 and expected size. It still represents the planned action set; it does not prove a provider-side copy has finished.
+- Existing 1229 integrity verification remains only as strong as expected metadata. If expected MD5 is unavailable, a pre-existing replica remains `unverified` unless a known size mismatch can be detected.
+- 1230 reconciliation preview persistence and the independent 30-minute per-drive snapshot cache remain active. “强制刷新全部” and “只刷新这个盘” intentionally bypass the relevant snapshot; OpenList storage/mount discovery still calls the admin storage API when manager state loads.
+- 1231 metadata parsing remains single-concurrency. The former 10/hour and 150/day hard attempt quotas stay removed; Range attempt/request/byte data remains telemetry only. Production should still monitor request frequency, bytes, 403/429 and provider-specific errors.
 - ZONOE still does not automatically create/modify OpenList Alias or rewrite MySQL `bt1a` to Alias paths. Direct physical URLs continue to bypass Alias load balancing.
+- Real BaoTa/OpenList checks still pending include: 1231 scheduler/Range/sidebar recheck, 1230 preview/snapshot reuse, 1229 known-MD5 integrity/source priority/stale-plan behavior, and new 1232 copy lifecycle/restart/verification/target-refresh/audit behavior.
