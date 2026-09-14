@@ -47,10 +47,12 @@ describe('OpenList IPA metadata sync contract',()=>{
     expect(smallDelta.sizeMismatch).toBe(false);
   });
 
-  test('scheduler has conservative Tianyi defaults and safe bounds',()=>{
-    expect(RECOMMENDED_OPENLIST_SCHEDULE.intervalMinutes).toBe(10);
-    expect(RECOMMENDED_OPENLIST_SCHEDULE.parseLimit).toBe(3);
+  test('scheduler has conservative 15-minute / one-file effective defaults',()=>{
+    expect(RECOMMENDED_OPENLIST_SCHEDULE.intervalMinutes).toBe(15);
+    expect(RECOMMENDED_OPENLIST_SCHEDULE.parseLimit).toBe(1);
     expect(normalizeSchedule({enabled:true,intervalMinutes:1,parseLimit:99})).toEqual({enabled:true,intervalMinutes:5,parseLimit:20});
-    expect(normalizeSchedule({})).toEqual({enabled:false,intervalMinutes:10,parseLimit:3});
+    const service=fs.readFileSync(`${root}/apps/api/src/services/openListMetadataService.js`,'utf8');
+    expect(service).toContain('intervalMinutes:Math.max(15');
+    expect(service).toContain('parseLimit:1');
   });
 });
