@@ -2,7 +2,7 @@ import {describe,expect,test} from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {summarizeRangeUsage,RANGE_DAILY_LIMIT,RANGE_HOURLY_LIMIT} from '../src/services/rangeUsageService.js';
+import {summarizeRangeUsage} from '../src/services/rangeUsageService.js';
 import {snapshotFresh,REPLICA_SNAPSHOT_TTL_MS} from '../src/services/replicaSnapshotStore.js';
 
 const root=fileURLToPath(new URL('../../../',import.meta.url));
@@ -36,25 +36,30 @@ describe('OpenList API scheduling and cache contract',()=>{
     expect(sync).not.toContain('const preview=await previewReplicas()');
   });
 
-  test('Range parser budget is 10/hour and 150/day',()=>{
-    expect(RANGE_HOURLY_LIMIT).toBe(10);
-    expect(RANGE_DAILY_LIMIT).toBe(150);
+  test('Range usage is telemetry-only and no longer exposes hourly/daily quota fields',()=>{
     const now=Date.now();
-    const events=Array.from({length:11},(_,i)=>({at:new Date(now-i*1000).toISOString(),success:true,rangeBytes:100,rangeRequests:1}));
+    const events=Array.from({length:11},(_,i)=>({at:new Date(now-i*1000).toISOString(),success:true,rangeBytes:100,rangeRequests:2}));
     const s=summarizeRangeUsage(events,now);
-    expect(s.hour.remaining).toBe(0);
+    expect(s.hour.attempts).toBe(11);
+    expect(s.hour.rangeRequests).toBe(22);
     expect(s.day.attempts).toBe(11);
+    expect(s).not.toHaveProperty('limits');
+    expect(s.hour).not.toHaveProperty('remaining');
+    expect(s.day).not.toHaveProperty('remaining');
   });
 
-  test('Range request count/bytes and MD5 reuse are wired into core sync',()=>{
+  test('Range request count/bytes and MD5 reuse are wired into core sync without global quota gating',()=>{
     const parser=read('scripts/ipa-range-info.py');
     const service=read('apps/api/src/services/openListMetadataService.js');
     expect(parser).toContain("'range_requests': remote.requests");
     expect(service).toContain('appendRangeUsage');
-    expect(service).toContain('getRangeBudgetStatus');
+    expect(service).toContain('getRangeUsageStatus');
     expect(service).toContain('getParsedMetadataByMd5');
     expect(service).toContain('rememberParsedMetadata');
     expect(service).toContain('metadataReusedByMd5');
+    expect(service).not.toContain('budgetAllowed');
+    expect(service).not.toContain('budgetBlocked');
+    expect(service).not.toContain('getRangeBudgetStatus');
   });
 
   test('background metadata reconciliation is no longer a 1 second loop',()=>{
@@ -63,7 +68,7 @@ describe('OpenList API scheduling and cache contract',()=>{
     expect(service).not.toContain('1000);');
   });
 
-  test('admin UI exposes cache diagnostics, formatted Range usage and configurable schedule',()=>{
+  test('admin UI shows plain Range totals, configurable schedule and no quota copy',()=>{
     const replica=read('apps/web/src/pages/AdminReplicaPanel.jsx');
     const metadata=read('apps/web/src/pages/AdminOpenListPanel.jsx');
     expect(replica).toContain('只刷新这个盘');
@@ -72,10 +77,22 @@ describe('OpenList API scheduling and cache contract',()=>{
     expect(replica).toContain('补齐计划预览');
     expect(metadata).toContain('Range Parser 用量');
     expect(metadata).toContain('function TextCard');
-    expect(metadata).toContain('<TextCard t="本小时"');
+    expect(metadata).toContain('<TextCard t="本小时" v={Number(hour.attempts||0).toLocaleString()}/>');
+    expect(metadata).toContain('<TextCard t="今日" v={Number(day.attempts||0).toLocaleString()}/>');
     expect(metadata).toContain('min="5" max="1440"');
     expect(metadata).toContain('min="1" max="20"');
     expect(metadata).toContain('后台扫描 MD5（使用缓存）');
     expect(metadata).toContain('后台解析 1 个');
+    expect(metadata).not.toContain('/10');
+    expect(metadata).not.toContain('/150');
+    expect(metadata).not.toContain('剩余额度');
+    expect(metadata).not.toContain('预算拦截');
+    expect(metadata).not.toContain('budgetExhausted');
+  });
+
+  test('desktop admin sidebar stays visible while page scrolls and mobile bottom nav stays fixed',()=>{
+    const css=read('apps/web/src/styles.css');
+    expect(css).toContain('.admin-shell aside{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto');
+    expect(css).toContain('.admin-shell aside{position:fixed;top:auto;bottom:0;left:0;right:0;z-index:60;height:auto;overflow-y:visible;align-self:auto');
   });
 });

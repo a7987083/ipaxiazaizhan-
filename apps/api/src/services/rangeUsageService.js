@@ -3,8 +3,6 @@ import path from 'node:path';
 import { CONTROL_DIR } from '../storage/controlStore.js';
 
 export const RANGE_USAGE_FILE=path.join(CONTROL_DIR,'openlist-range-usage.json');
-export const RANGE_HOURLY_LIMIT=10;
-export const RANGE_DAILY_LIMIT=150;
 const KEEP_DAYS=8;
 const MAX_EVENTS=5000;
 let writeQueue=Promise.resolve();
@@ -39,11 +37,9 @@ export function summarizeRangeUsage(events=[],now=Date.now()){
     rangeBytes:list.reduce((n,x)=>n+x.rangeBytes,0),
     rangeRequests:list.reduce((n,x)=>n+x.rangeRequests,0)
   });
-  const h=sum(hour),d=sum(today);
   return {
-    limits:{hourly:RANGE_HOURLY_LIMIT,daily:RANGE_DAILY_LIMIT},
-    hour:{...h,remaining:Math.max(0,RANGE_HOURLY_LIMIT-h.attempts)},
-    day:{...d,remaining:Math.max(0,RANGE_DAILY_LIMIT-d.attempts),date:day},
+    hour:sum(hour),
+    day:{...sum(today),date:day},
     recent:normalized.slice(-20).reverse()
   };
 }
@@ -53,7 +49,7 @@ export async function readRangeUsage(){
   catch(e){if(e?.code==='ENOENT')return {version:1,events:[],updatedAt:null};throw e}
 }
 
-export async function getRangeBudgetStatus(){
+export async function getRangeUsageStatus(){
   const usage=await readRangeUsage();
   return summarizeRangeUsage(usage.events);
 }

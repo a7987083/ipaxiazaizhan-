@@ -47,14 +47,17 @@ describe('OpenList IPA metadata sync contract',()=>{
     expect(smallDelta.sizeMismatch).toBe(false);
   });
 
-  test('scheduler is configurable while Range budgets stay authoritative',()=>{
+  test('scheduler is configurable and the saved per-run count is authoritative',()=>{
     expect(RECOMMENDED_OPENLIST_SCHEDULE.intervalMinutes).toBe(15);
     expect(RECOMMENDED_OPENLIST_SCHEDULE.parseLimit).toBe(1);
     expect(normalizeSchedule({enabled:true,intervalMinutes:1,parseLimit:99})).toEqual({enabled:true,intervalMinutes:5,parseLimit:20});
     const service=fs.readFileSync(`${root}/apps/api/src/services/openListMetadataService.js`,'utf8');
     expect(service).toContain('intervalMinutes:Math.min(1440,Math.max(5');
     expect(service).toContain('parseLimit:Math.min(20,Math.max(1');
+    expect(service).toContain('const selected=eligible.slice(0,parseLimit);');
     expect(service).not.toContain('intervalMinutes:Math.max(15');
     expect(service).not.toContain('parseLimit:1\n  };');
+    expect(service).not.toContain('budgetAllowed');
+    expect(service).not.toContain('budgetBlocked');
   });
 });

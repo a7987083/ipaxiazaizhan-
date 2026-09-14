@@ -11,12 +11,12 @@ import {
   getParsedMetadataByMd5,loadAndSeedIpaMetadataLibrary,normalizeMd5,
   rememberParsedMetadata,writeIpaMetadataLibrary
 } from './ipaMetadataLibrary.js';
-import { appendRangeUsage,getRangeBudgetStatus } from './rangeUsageService.js';
+import { appendRangeUsage,getRangeUsageStatus } from './rangeUsageService.js';
 
 const PARSER = fileURLToPath(new URL('../../../../scripts/ipa-range-info.py', import.meta.url));
 const DIRECTORY_CACHE_TTL_MS = 30*60*1000;
 const PARSE_RETRY_DELAY_MS = 30*60*1000;
-export const RECOMMENDED_OPENLIST_SCHEDULE={intervalMinutes:15,parseLimit:1,label:'建议默认：每 15 分钟解析 1 个；可自定义 5–1440 分钟 / 每轮 1–20 个；小时 10 个 / 每日 150 个硬预算'};
+export const RECOMMENDED_OPENLIST_SCHEDULE={intervalMinutes:15,parseLimit:1,label:'建议默认：每 15 分钟解析 1 个；可自定义 5–1440 分钟 / 每轮 1–20 个'};
 
 let taskLocked=false;
 let schedulerTimer=null;
@@ -297,10 +297,7 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
     if(md5)seenMd5.add(md5);
     eligible.push(p);
   }
-  const budgetBefore=await getRangeBudgetStatus();
-  const budgetAllowed=Math.min(Number(budgetBefore.hour.remaining||0),Number(budgetBefore.day.remaining||0));
-  const selected=eligible.slice(0,Math.min(parseLimit,budgetAllowed));
-  const budgetBlocked=Math.max(0,Math.min(parseLimit,eligible.length)-selected.length);
+  const selected=eligible.slice(0,parseLimit);
   let parsedNow=0,parseFailedNow=0,rangeBytesNow=0,rangeRequestsNow=0;
   for(let i=0;i<selected.length;i+=1) {
     const apiPath=selected[i];
@@ -330,9 +327,9 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
   if(libraryChanged)await writeIpaMetadataLibrary(library);
   const pending=expected.filter(p=>files[p]&&!files[p].missing&&!hasCurrentParse(files[p]));
   const eligiblePending=pending.filter(p=>!files[p].nextParseAfter || Date.parse(files[p].nextParseAfter)<=Date.now());
-  const rangeUsage=await getRangeBudgetStatus();
-  const lastSync={finishedAt:nowIso(),databaseRefs:refs.length,ignoredRefs:ignored,uniqueFiles:expected.length,foundFiles:expected.length-missingFiles,missingFiles,missingRefs:missingEntries.length,newFiles,changedFiles,unchangedFiles,metadataReusedByMd5,parsedNow,parseFailedNow,pendingParse:pending.length,eligibleParse:eligiblePending.length,budgetBlocked,rangeBytesNow,rangeRequestsNow,cacheHits,cacheRefreshes,directoryCacheMinutes:30,sourceErrors,rangeUsage};
-  await updateTask(taskIdValue,{stage:'saving',message:'正在保存 IPA 元数据缓存',progress:{pendingParse:pending.length,eligibleParse:eligiblePending.length,budgetBlocked,rangeBytesNow,rangeRequestsNow}});
+  const rangeUsage=await getRangeUsageStatus();
+  const lastSync={finishedAt:nowIso(),databaseRefs:refs.length,ignoredRefs:ignored,uniqueFiles:expected.length,foundFiles:expected.length-missingFiles,missingFiles,missingRefs:missingEntries.length,newFiles,changedFiles,unchangedFiles,metadataReusedByMd5,parsedNow,parseFailedNow,pendingParse:pending.length,eligibleParse:eligiblePending.length,rangeBytesNow,rangeRequestsNow,cacheHits,cacheRefreshes,directoryCacheMinutes:30,sourceErrors,rangeUsage};
+  await updateTask(taskIdValue,{stage:'saving',message:'正在保存 IPA 元数据缓存',progress:{pendingParse:pending.length,eligibleParse:eligiblePending.length,rangeBytesNow,rangeRequestsNow}});
   await writeOpenListIpaCache({version:3,files,apps,appRefs,missingEntries,lastSync});
   return lastSync;
 }
@@ -340,7 +337,7 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
 async function runQueuedTask(spec) {
   try {
     const result=await syncOpenListIpaMetadata({...spec,taskIdValue:spec.id});
-    await updateTask(spec.id,{state:'success',stage:'done',message:`完成：本次解析 ${result.parsedNow}，待解析 ${result.pendingParse}`,finishedAt:nowIso(),result,progress:{parseDone:result.parsedNow+result.parseFailedNow,parsedSuccess:result.parsedNow,parsedFailed:result.parseFailedNow,pendingParse:result.pendingParse,budgetBlocked:result.budgetBlocked,rangeBytesNow:result.rangeBytesNow,rangeRequestsNow:result.rangeRequestsNow}});
+    await updateTask(spec.id,{state:'success',stage:'done',message:`完成：本次解析 ${result.parsedNow}，待解析 ${result.pendingParse}`,finishedAt:nowIso(),result,progress:{parseDone:result.parsedNow+result.parseFailedNow,parsedSuccess:result.parsedNow,parsedFailed:result.parseFailedNow,pendingParse:result.pendingParse,rangeBytesNow:result.rangeBytesNow,rangeRequestsNow:result.rangeRequestsNow}});
   } catch(e) {
     await updateTask(spec.id,{state:'failed',stage:'failed',message:String(e?.message||'OpenList 同步失败').slice(0,500),finishedAt:nowIso(),errorCode:e?.code||'OPENLIST_SYNC_FAILED'}).catch(()=>{});
   } finally { taskLocked=false; }
@@ -423,7 +420,7 @@ export async function listOpenListParseResults({page=1,pageSize=50,q='',status='
 }
 
 export async function getOpenListIpaStatus() {
-  const [cfg,cache,task,rangeUsage]=await Promise.all([getOpenListConfig(),readOpenListIpaCache(),readOpenListTask(),getRangeBudgetStatus()]);
+  const [cfg,cache,task,rangeUsage]=await Promise.all([getOpenListConfig(),readOpenListIpaCache(),readOpenListTask(),getRangeUsageStatus()]);
   const values=Object.values(cache.files||{});
   const parsed=values.filter(x=>x?.parsed).length;
   const failed=values.filter(x=>x?.parseError).length;
