@@ -80,7 +80,7 @@ export async function startIpaMetadataPersistence(){
   if(timer)return;
   await reconcileIpaMetadataPersistence();
   initialized=true;
-  // OpenList account/token/path changes are uncommon; a 1s guard keeps cache identity coherent without touching IPA bytes.
-  timer=setInterval(()=>reconcileIpaMetadataPersistence().catch(e=>console.error('IPA metadata persistence:',e?.message||e)),1000);
+  // Core sync now reuses the MD5 library immediately. This timer is only a low-frequency reconciliation guard.
+  timer=setInterval(()=>reconcileIpaMetadataPersistence().catch(e=>console.error('IPA metadata persistence:',e?.message||e)),30_000);
   timer.unref?.();
 }
