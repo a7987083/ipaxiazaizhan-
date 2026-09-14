@@ -1,5 +1,24 @@
 # Development Changelog
 
+## 2026-09-14 — 2026091228 OpenList API scheduling + Range budget hardening
+
+- 元数据和多网盘副本目录扫描统一改为 OpenList `/api/fs/list` 的 `per_page:0` + `refresh:false`。平铺约 7271 个 IPA 的目录不再按 500 条分页，ZONOE→OpenList 列表调用理论上由约 15 次降到 1 次；子目录仍按目录各请求一次。
+- 元数据目录缓存继续保留 30 分钟，但缓存 scope 新增 OpenList 令牌 SHA-256 指纹，换账号/换令牌后不会复用旧账号目录缓存。
+- 新增 `CONTROL_DIR/openlist-replica-snapshots.json`，按 `storageId + rootPath` 持久保存每个实体网盘 30 分钟目录快照。
+- 普通“对账”优先使用有效网盘快照；新增“强制刷新全部”和“只刷新这个盘”，后台显示 OpenList 请求数、快照命中数和实际重扫网盘数。
+- “补齐缺失副本”不再无条件先全盘 `previewReplicas()`。复制使用最近有效对账/快照，提交后只让目标网盘快照失效；OpenList 异步复制结束后只需刷新目标盘确认。
+- 改名、隔离不再操作前后全盘扫描；只校验最近有效对账并在成功后刷新受影响网盘。
+- 同一批复制/隔离任务新增 mkdir 去重，同一目标目录在一批操作中不会为每个 IPA 重复执行完整 mkdir 链。
+- Python Range Parser 新增 `range_requests`，继续输出 `range_bytes`；解析失败也尽量返回已经发生的 Range 请求次数和读取字节。
+- 新增 `CONTROL_DIR/openlist-range-usage.json`，持久记录 Range 解析尝试、成功/失败、真实 Range 请求次数和读取字节。
+- Range Parser 增加硬预算：滚动 1 小时最多 10 个解析尝试、UTC 当天最多 150 个；定时解析实际执行下限为每 15 分钟 1 个，解析仍为单并发串行。
+- 元数据核心同步现在在候选选择前直接查询 MD5 持久解析库；同 MD5 且大小不冲突时立即复用，不等后台 1 秒轮询。单次任务内相同 MD5 也只 Range 解析一次，其余副本直接继承结果。
+- `ipaMetadataPersistenceService` 后台兜底轮询由 1 秒降到 30 秒，避免无意义的高频本地 JSON 检查。
+- 单 IPA 16 MiB Range 安全上限暂不降低；先收集真实 `range_requests/range_bytes` 分布，再决定是否安全降到 8 MiB 或 4 MiB。
+- 新增 `api-scheduling.contract.test.js`，覆盖 `per_page:0`、30 分钟副本快照、目标盘局部失效、同步取消全盘预扫、10/150 Range 预算、Range 计量、MD5 复用和 30 秒后台兜底。
+- Actions #135 / run `34825687295`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、Legacy Docker compose syntax、部署包构建/校验全部成功。
+- 真实 BaoTa/OpenList 7000+ 文件请求数、快照命中、单盘刷新、Range 用量和预算拦截仍待生产 E2E 验证。
+
 ## 2026-09-14 — 2026091227 Replica reconciliation persistence + Alias distribution UX
 
 - 修复“云盘副本”对账结果只存在浏览器内存、切换后台页面后消失的问题。最新对账现在持久化到 `CONTROL_DIR/openlist-replica-preview.json`，重新进入页面、刷新浏览器或 Node 服务重启后均可恢复。
