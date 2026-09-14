@@ -6,15 +6,18 @@
 - 复制任务状态升级为 `submitted / waiting / verifying / success / failed / timeout`。API 服务启动时自动启动核验器，每 15 秒串行检查待完成任务；Node 服务重启后可从持久状态继续核验。
 - 复制完成验证优先比较 MD5；目标驱动不返回 Hash 时明确降级为“大小一致”，缺少可比较的期望 Hash/大小时仅标记“文件存在”，不再把弱验证伪装成 MD5 已验证。
 - 目标文件 10 分钟仍未出现会进入 `timeout`；MD5/大小异常进入失败状态并写入审计，不会被当成复制成功。
+- 新增独立的异常一致性窗口：`mismatchSince` 在第一次观察到 MD5/大小异常时持久化，30 秒确认期从“第一次看到异常”开始计算，而不是从 `/api/fs/copy` 提交时间开始。这样即使目标文件较晚才出现，也不会因为复制请求早已超过 30 秒而被立即判失败；后续验证恢复正常会清空该标记。实现 commit `9aacafbcc98c5dac3f326516021c8a3cc3165a63`。
 - Sync Plan 的 SHA-256 `planHash` 现在同时绑定来源/目标目录、期望 MD5 和期望大小，避免期望内容或副本根目录变化后继续执行旧计划。
 - 执行补齐计划后返回 `trackingBatchId`；后台新增“副本任务”页面，可查看复制批次、每个 IPA 的来源→目标、状态、验证方式、实际 MD5/大小、检查次数，以及最近操作审计，并提供“立即核验复制任务”。
 - 批次进入终态后仅让真正接收过复制任务的目标盘快照失效并定向刷新，不做所有网盘全量重扫。
 - 修复 failed-only 边界：如果一个批次的所有 `/api/fs/copy` 提交都失败，批次不会保留目标刷新列表，也不会之后无意义强刷目标盘；批次审计状态直接记为失败。对应 hardening commit `839cc5ebfb1d2b9cc0431481b93240d3ac4a48cd`，contract commit `84501078d2238080bc7ca32e97599f21e5992c66`。
 - 名称修复和隔离操作也进入统一审计；审计不保存 OpenList Token、`raw_url` 或 IPA 直链。
 - 1229 的完整性/来源优先级/过期计划保护、1230 的对账持久化和 30 分钟单盘快照、1231 的 Range telemetry-only/可配置调度/桌面 sticky 菜单全部保持。
-- 1232 已加入 contract coverage：MD5 成功、异常确认、缺失超时、无 Hash 大小降级、生命周期计数、重启恢复接线、任务/审计 UI、计划 Hash 内容绑定、failed-only 批次不刷新目标盘。
-- CI 当前不是“测试失败”，而是 GitHub Actions 在创建 job 之前即 `startup_failure`。1231 最后一次正常 release run `34853328149` 使用真实 workflow `356290327`、路径 `.github/workflows/ci-release.yml` 并成功；1232 的失败 run 则被路由到不同 workflow `358014548`、空名称、路径 `BuildFailed`，且 jobs=0。该症状与近期 GitHub Actions synthetic/orphan `BuildFailed` workflow-registry 故障一致。
-- 因 CI 未进入任何 job，1232 的 Integration tests、Production build、smoke/contracts、部署包构建/校验和 Artifact 上传目前都不能标记通过；尚无 1232 部署包，真实 BaoTa/OpenList 小批量复制生命周期 E2E 也待验证。
+- 1232 contract coverage 现已覆盖：MD5 成功、第一次异常观察起算的 30 秒确认期、异常恢复后清除标记、缺失超时、无 Hash 大小降级、生命周期计数、重启恢复接线、任务/审计 UI、计划 Hash 内容绑定、failed-only 批次不刷新目标盘。
+- 早期 1232 push 曾被 GitHub 路由到 synthetic `BuildFailed` 并在创建 job 前 `startup_failure`；该现象在最新 functional run 中已不再复现。
+- Actions run `34878831197` / run #162 在真实 `.github/workflows/ci-release.yml`（workflow `356290327`）上成功：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、Legacy Docker compose syntax、部署包构建/校验和 Artifact 上传全部通过；GitHub Release publish 与 `release-e2e` 按 workflow 条件 skipped。
+- 1232 部署 Artifact：`zonoe-ipa-download-2026091232-baota-native-build`，artifact id `10362077299`，大小 `628946` bytes，sha256 `4003f223c5ffc5d4971bec63374ee831efab2587c95fc8b386b53e76914bd69c`，有效期至 `2026-10-14T18:07:38Z`。
+- 真实 BaoTa/OpenList 小批量复制生命周期、第一次异常观察起算、重启续跑、目标盘定向刷新与审计 E2E 仍待验证。
 
 ## 2026-09-14 — 2026091231 Range quota removal + sticky admin navigation
 

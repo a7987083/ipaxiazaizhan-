@@ -21,13 +21,17 @@
 - [x] Return tracking batch ID after copy submission
 - [x] Refresh only affected target drives after a batch reaches terminal state
 - [x] Prevent failed-only copy batches from scheduling unnecessary target refresh
+- [x] Start the 30-second mismatch consistency window when the mismatch is first observed, not when copy submission occurred
+- [x] Persist `mismatchSince` and clear it after a later verified result
 - [x] Preserve existing replica preview persistence and 30-minute per-drive snapshot cache
-- [x] Add 1232 contract coverage for lifecycle/verification/audit and failed-only batch handling
-- [ ] Restore GitHub Actions startup. Current 1232 pushes end at `startup_failure` before any job is created; latest checked run `34875645903`.
-- [ ] Run full Integration tests + Production build + API/frontend smoke + BaoTa/native contracts + package validation on the 1232 tree
-- [ ] Produce and validate `2026091232` deployment artifact
+- [x] Add 1232 contract coverage for lifecycle/verification/audit, failed-only batch handling and late first-observed mismatch grace
+- [x] GitHub Actions recovered to the real CI workflow on run #162 / `34878831197`
+- [x] Full Integration tests + Production build + API/frontend smoke + BaoTa/native contracts + package validation passed on functional head `9aacafbcc98c5dac3f326516021c8a3cc3165a63`
+- [x] Produce and validate `zonoe-ipa-download-2026091232-baota-native-build` artifact (`sha256:4003f223c5ffc5d4971bec63374ee831efab2587c95fc8b386b53e76914bd69c`)
+- [ ] Deploy 2026091232 to real BaoTa/OpenList
 - [ ] Real BaoTa/OpenList: submit a safe 1–5 IPA copy batch and observe `submitted -> waiting/verifying -> terminal`
 - [ ] Real BaoTa/OpenList: confirm MD5 result where provider exposes hash and explicit size-only fallback where it does not
+- [ ] Real BaoTa/OpenList: confirm a late-appearing mismatch receives a fresh 30-second grace window from first observation
 - [ ] Real BaoTa/OpenList: restart Node during a pending copy and confirm persisted lifecycle resumes
 - [ ] Real BaoTa/OpenList: confirm batch completion refreshes only actual target drives and failed-only submissions refresh none
 - [ ] Real BaoTa/OpenList: confirm copy/verify/refresh/rename/quarantine audit history and absence of secrets/raw URLs
@@ -39,6 +43,10 @@
 ## Important 1232 copy rule
 
 An OpenList copy API response only means the request was accepted. ZONOE must keep the operation pending until the target is independently observed and verified. MD5 is authoritative when both expected and target MD5 are available; lack of target hash must be displayed as a weaker verification level rather than a false MD5 success.
+
+## Important mismatch-grace rule
+
+The 30-second mismatch confirmation window begins when ZONOE first observes an MD5/size mismatch and persists that timestamp as `mismatchSince`. It is not measured from `/api/fs/copy` submission time. This prevents a target that appears late from being marked failed immediately. A later healthy verification clears the mismatch marker.
 
 ## Important target-refresh rule
 
@@ -63,4 +71,4 @@ The recommended metadata-parser default remains 15 minutes / 1 IPA but administr
 - `2026091229`: replica integrity classification + source-priority sync planning + stale-plan protection; CI passed; production E2E pending.
 - `2026091230`: Range summary rendering + scheduler configurability + replica preview persistence hotfix; CI passed.
 - `2026091231`: fixed global Range quotas removed, telemetry-only usage view, sticky desktop admin sidebar; release CI passed; real BaoTa recheck pending.
-- `2026091232`: source implementation for copy lifecycle/verification/audit is committed; CI is currently blocked at GitHub Actions startup before jobs are created, so 1232 is not yet release-verified.
+- `2026091232`: copy lifecycle/verification/audit + first-observed mismatch grace; functional CI run #162 passed and deployment artifact was validated/uploaded; real BaoTa/OpenList E2E remains pending.
