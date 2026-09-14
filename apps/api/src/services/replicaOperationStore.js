@@ -24,7 +24,7 @@ function normalizeOperation(x={}){
     sourceLabel:text(x.sourceLabel,160),targetLabel:text(x.targetLabel,160),sourceStatus:text(x.sourceStatus,40),
     expectedMd5:text(x.expectedMd5,128).toUpperCase(),expectedSize:num(x.expectedSize),actualMd5:text(x.actualMd5,128).toUpperCase(),actualSize:num(x.actualSize),
     verification:text(x.verification,80),attempts:num(x.attempts),createdAt:x.createdAt||nowIso(),submittedAt:x.submittedAt||null,
-    lastCheckedAt:x.lastCheckedAt||null,completedAt:x.completedAt||null,error:text(x.error,500),message:text(x.message,500)
+    lastCheckedAt:x.lastCheckedAt||null,mismatchSince:x.mismatchSince||null,completedAt:x.completedAt||null,error:text(x.error,500),message:text(x.message,500)
   };
 }
 function normalizeBatch(x={}){
