@@ -1,5 +1,21 @@
 # Development Changelog
 
+## 2026-09-15 — 2026091232 Replica copy lifecycle + verification + audit
+
+- OpenList `/api/fs/copy` 返回成功不再直接等同于“副本复制完成”。新增 `CONTROL_DIR/openlist-replica-operations.json`，持久保存复制批次、每个 IPA 的复制状态和操作审计；文件采用临时文件 + rename 原子写入并保持 `0600` 权限。
+- 复制任务状态升级为 `submitted / waiting / verifying / success / failed / timeout`。API 服务启动时自动启动核验器，每 15 秒串行检查待完成任务；Node 服务重启后可从持久状态继续核验。
+- 复制完成验证优先比较 MD5；目标驱动不返回 Hash 时明确降级为“大小一致”，缺少可比较的期望 Hash/大小时仅标记“文件存在”，不再把弱验证伪装成 MD5 已验证。
+- 目标文件 10 分钟仍未出现会进入 `timeout`；MD5/大小异常进入失败状态并写入审计，不会被当成复制成功。
+- Sync Plan 的 SHA-256 `planHash` 现在同时绑定来源/目标目录、期望 MD5 和期望大小，避免期望内容或副本根目录变化后继续执行旧计划。
+- 执行补齐计划后返回 `trackingBatchId`；后台新增“副本任务”页面，可查看复制批次、每个 IPA 的来源→目标、状态、验证方式、实际 MD5/大小、检查次数，以及最近操作审计，并提供“立即核验复制任务”。
+- 批次进入终态后仅让真正接收过复制任务的目标盘快照失效并定向刷新，不做所有网盘全量重扫。
+- 修复 failed-only 边界：如果一个批次的所有 `/api/fs/copy` 提交都失败，批次不会保留目标刷新列表，也不会之后无意义强刷目标盘；批次审计状态直接记为失败。对应 hardening commit `839cc5ebfb1d2b9cc0431481b93240d3ac4a48cd`，contract commit `84501078d2238080bc7ca32e97599f21e5992c66`。
+- 名称修复和隔离操作也进入统一审计；审计不保存 OpenList Token、`raw_url` 或 IPA 直链。
+- 1229 的完整性/来源优先级/过期计划保护、1230 的对账持久化和 30 分钟单盘快照、1231 的 Range telemetry-only/可配置调度/桌面 sticky 菜单全部保持。
+- 1232 已加入 contract coverage：MD5 成功、异常确认、缺失超时、无 Hash 大小降级、生命周期计数、重启恢复接线、任务/审计 UI、计划 Hash 内容绑定、failed-only 批次不刷新目标盘。
+- CI 当前不是“测试失败”，而是 GitHub Actions 在创建 job 之前即 `startup_failure`。1231 最后一次正常 release run `34853328149` 使用真实 workflow `356290327`、路径 `.github/workflows/ci-release.yml` 并成功；1232 的失败 run 则被路由到不同 workflow `358014548`、空名称、路径 `BuildFailed`，且 jobs=0。该症状与近期 GitHub Actions synthetic/orphan `BuildFailed` workflow-registry 故障一致。
+- 因 CI 未进入任何 job，1232 的 Integration tests、Production build、smoke/contracts、部署包构建/校验和 Artifact 上传目前都不能标记通过；尚无 1232 部署包，真实 BaoTa/OpenList 小批量复制生命周期 E2E 也待验证。
+
 ## 2026-09-14 — 2026091231 Range quota removal + sticky admin navigation
 
 - 根据真实运行观察，移除 Range Parser 固定的“每小时 10 个 / 每日 150 个解析尝试”硬预算。元数据同步不再读取小时/每日剩余额度来缩小本轮 `parseLimit`，管理员保存的每轮数量现在直接作为本轮上限。
@@ -124,7 +140,7 @@
 - 新增管理员专用 `/api/v1/admin/openlist/results-rich`；通过 Admin Auth + CSRF 保护，返回当前页解析结果及当前数据库下载地址。
 - 新增 contract tests 覆盖动态规则、旧配置迁移、下载链接 → `bt1a`、管理员下载地址接口、Build 明示、可新增映射规则等。
 - Actions #78 首次失败：唯一原因是 1223 的旧 UI contract 仍要求旧“当前映射字段”文案；1224 的新功能/新 contract 当轮均已通过。随后按动态规则新语义更新该契约。
-- Actions #79 / run `34784361324`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、部署包构建/校验和 Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
+- Actions #79 / run `34784361324`：Integration tests、Production build、Native API smoke、Native frontend static smoke、Shell validation、BaoTa native contract、MySQL multi-source contract、GitHub updater contract、Legacy Docker compose syntax、部署包构建/校验和 Artifact 上传全部成功；`release-e2e` 按现有条件 skipped。
 - 真实 BaoTa 2026091224 部署和真实 MySQL 写入仍待验证。
 
 ## 2026-09-14 — 2026091223 Write-back preview visibility hotfix
