@@ -5,7 +5,10 @@
 - Candidate: `2026091231`
 - Baseline: `2026091230` / `cbbe8065db127619353d4ff2eecbdd2f144bf0f0`
 - Functional code: `4f574815d9ad2fba94ef910f5c2904f19c3937d9`
+- Release commit: `c6a4991a93752b76fcd998da007ae95e15ede25a`
 - Functional CI: Actions #156 / run `34852734004` passed validation and package jobs.
+- Release CI: Actions #157 / run `34853328149` passed validation and package jobs.
+- Deployment artifact: `zonoe-ipa-download-2026091231-baota-native-build` / sha256 `f2abbe1ab848dbd46df4bcd72dd0b0dbfa3e266b01544cf82773005c85b1d56c`.
 - Real BaoTa/OpenList 1231 recheck: pending.
 
 ## What 1231 changes
@@ -25,7 +28,7 @@ Production observation showed typical parses using about 2 Range requests and le
 
 ## CI verification
 
-Actions #156 / run `34852734004` passed:
+Actions #156 / run `34852734004` validated the functional code. Actions #157 / run `34853328149` validated the versioned 2026091231 release tree and package. Both passed:
 - Integration tests
 - Range telemetry-only contracts
 - scheduler configuration contracts
@@ -40,7 +43,7 @@ Actions #156 / run `34852734004` passed:
 - Legacy Docker compose syntax
 - deployment package build/validation/artifact upload
 
-`release-e2e` remains skipped by workflow condition. A final CI run after the 2026091231 version/docs commit is still required before declaring the release package final.
+`release-e2e` remains skipped by workflow condition, so real BaoTa/OpenList 1231 behavior still needs the short recheck below.
 
 ## Recommended real recheck
 

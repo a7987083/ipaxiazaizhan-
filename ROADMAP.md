@@ -20,7 +20,7 @@
 - [x] Preserve 1230 persisted replica preview restore and 30-minute per-drive snapshot behavior
 - [x] Add contracts for telemetry-only Range usage, no global quota gating and sticky admin navigation
 - [x] 2026091231 functional Actions #156 / run `34852734004` passed validation/build/package jobs
-- [ ] Run final release CI after version/docs commit
+- [x] 2026091231 release Actions #157 / run `34853328149` passed validation/build/package jobs and produced the deployment artifact
 - [ ] Deploy 2026091231 to real BaoTa
 - [ ] Save a non-default schedule and confirm it survives reload without server error
 - [ ] Confirm Range summary shows plain hourly/day totals and no `/10`, `/150`, “剩余额度” or “预算拦截”
@@ -62,4 +62,4 @@ The reconciliation result file and per-drive directory snapshots remain separate
 - `2026091228`: API scheduling, persistent per-drive snapshots, targeted refresh, Range telemetry and core MD5 pre-parse reuse; CI passed; real traffic profile partially observed.
 - `2026091229`: replica integrity classification + source-priority sync planning + stale-plan protection; CI passed; production E2E pending.
 - `2026091230`: Range summary rendering + scheduler configurability + replica preview persistence hotfix; CI passed.
-- `2026091231`: fixed global Range quotas removed, telemetry-only usage view, sticky desktop admin sidebar; functional CI #156 passed; real BaoTa recheck pending.
+- `2026091231`: fixed global Range quotas removed, telemetry-only usage view, sticky desktop admin sidebar; release CI #157 passed; real BaoTa recheck pending.

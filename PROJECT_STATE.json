@@ -8,14 +8,10 @@
     "ci": "passed"
   },
   "phase": "Phase 2.6 Range quota removal + admin sticky navigation",
-  "phase_status": "functional_ci_passed_final_release_ci_pending",
+  "phase_status": "ci_passed_real_baota_openlist_recheck_pending",
   "production_verified": false,
   "functional_code_commit": "4f574815d9ad2fba94ef910f5c2904f19c3937d9",
-  "functional_ci": {
-    "run": 34852734004,
-    "run_number": 156,
-    "conclusion": "success"
-  },
+  "release_commit": "c6a4991a93752b76fcd998da007ae95e15ede25a",
   "features": {
     "range_usage_telemetry_only": true,
     "range_hourly_hard_limit_removed": true,
@@ -45,6 +41,9 @@
     "functional_github_actions_run": 34852734004,
     "functional_github_actions_run_number": 156,
     "functional_github_actions_conclusion": "success",
+    "release_github_actions_run": 34853328149,
+    "release_github_actions_run_number": 157,
+    "release_github_actions_conclusion": "success",
     "integration_tests": "passed",
     "range_telemetry_only_contracts": "passed",
     "scheduler_contract_tests": "passed",
@@ -59,8 +58,9 @@
     "legacy_docker_compose_syntax": "passed",
     "deployment_package_build_and_validation": "passed",
     "artifact_upload": "passed",
+    "deployment_artifact": "zonoe-ipa-download-2026091231-baota-native-build",
+    "deployment_artifact_sha256": "f2abbe1ab848dbd46df4bcd72dd0b0dbfa3e266b01544cf82773005c85b1d56c",
     "release_e2e": "skipped_by_workflow_condition",
-    "final_release_ci": "pending",
     "real_baota_1231_schedule_recheck": "pending",
     "real_baota_1231_range_totals_recheck": "pending",
     "real_baota_1231_sidebar_recheck": "pending"

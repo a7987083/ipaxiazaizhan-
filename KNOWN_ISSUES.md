@@ -2,7 +2,7 @@
 
 ## 2026091231 candidate
 
-- Functional Actions #156 / run `34852734004` passed source tests, production build, smoke/contracts, deployment package validation and artifact upload. Final CI after the version/docs commit is still pending; real BaoTa/OpenList 1231 behavior is not yet claimed as verified.
+- Functional Actions #156 / run `34852734004` and release Actions #157 / run `34853328149` both passed source tests, production build, smoke/contracts, deployment package validation and artifact upload. Real BaoTa/OpenList 1231 behavior is still pending production verification.
 - The old fixed Range Parser limits of 10 parse attempts/hour and 150/day are removed in 1231. The usage store is telemetry-only and no longer returns or enforces remaining quota.
 - Scheduled parsing still validates interval 5–1440 minutes and per-run count 1–20. Manual parsing still uses the existing API per-run maximum. These per-run bounds are not the removed hourly/daily quota.
 - Parsing remains single-concurrency sequential. 1231 intentionally does not add parser parallelism; this keeps request bursts controlled while allowing the administrator's saved schedule to run without a second hidden quota.
