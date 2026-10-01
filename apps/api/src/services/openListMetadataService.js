@@ -37,12 +37,36 @@ function cleanPrefix(v='/d/a/app/') {
   if(!s.endsWith('/')) s+='/' ;
   return s;
 }
+function publicPrefixSpec(v='/d/a/app/',configUrl='') {
+  const raw=String(v||'/d/a/app/').trim();
+  if(/^https?:\/\//i.test(raw)) {
+    try {
+      const u=new URL(raw);
+      return {hostname:u.hostname.toLowerCase(),pathname:cleanPrefix(u.pathname||'/')};
+    } catch {}
+  }
+  let hostname='';
+  try { hostname=new URL(String(configUrl||'')).hostname.toLowerCase(); } catch {}
+  return {hostname,pathname:cleanPrefix(raw)};
+}
 function joinApiPath(base,relative) {
   let rel=String(relative||''); while(rel.startsWith('/')) rel=rel.slice(1);
   const parts=rel.split('/').filter(Boolean);
   if(parts.some(x=>x==='..')) return null;
   const out=path.posix.join(cleanBasePath(base),...parts);
   return out.startsWith('/')?out:`/${out}`;
+}
+function relativeForApiBase(pathname,prefix,apiBasePath) {
+  if(!pathname.startsWith(prefix)) return null;
+  let rel=pathname.slice(prefix.length);
+  while(rel.startsWith('/')) rel=rel.slice(1);
+  const base=cleanBasePath(apiBasePath||'/');
+  const baseRel=base==='/'?'':base.slice(1);
+  if(baseRel && (rel===baseRel || rel.startsWith(`${baseRel}/`))) {
+    rel=rel.slice(baseRel.length);
+    while(rel.startsWith('/')) rel=rel.slice(1);
+  }
+  return rel;
 }
 function numericSize(v){ const n=Number(String(v??'').trim()); return Number.isFinite(n)&&n>=0?Math.round(n):null; }
 export function safeAppRef(ref={}) {
@@ -66,7 +90,7 @@ export function auditIpaResult(ref={},file={}) {
 function nowIso(){ return new Date().toISOString(); }
 function taskId(){ return `${Date.now()}-${Math.random().toString(36).slice(2,8)}`; }
 function tokenFingerprint(token){return createHash('sha256').update(String(token||'')).digest('hex').slice(0,16)}
-function cacheScopeKey(config){ return `${String(config.url||'').replace(/\/+$/,'')}|${cleanBasePath(config.apiBasePath||'/')}|${cleanPrefix(config.publicPathPrefix||'/d/a/app/')}|${tokenFingerprint(config.token)}`; }
+function cacheScopeKey(config){ const spec=publicPrefixSpec(config.publicPathPrefix||'/d/a/app/',config.url); return `${String(config.url||'').replace(/\/+$/,'')}|${cleanBasePath(config.apiBasePath||'/')}|${spec.hostname}${spec.pathname}|${tokenFingerprint(config.token)}`; }
 function cacheFresh(fetchedAt){ const t=Date.parse(String(fetchedAt||'')); return Number.isFinite(t) && Date.now()-t<DIRECTORY_CACHE_TTL_MS; }
 function effectiveSchedule(schedule={}){
   return {
@@ -80,12 +104,14 @@ export function publicUrlToApiPath(rawUrl, config) {
   try {
     const base=new URL(config.url);
     const u=new URL(String(rawUrl||'').trim());
-    if(u.hostname.toLowerCase()!==base.hostname.toLowerCase()) return null;
+    const spec=publicPrefixSpec(config.publicPathPrefix,config.url);
+    const expectedHost=spec.hostname||base.hostname.toLowerCase();
+    if(u.hostname.toLowerCase()!==expectedHost) return null;
     let pathname=u.pathname;
     try { pathname=decodeURIComponent(pathname); } catch {}
-    const prefix=cleanPrefix(config.publicPathPrefix);
-    if(!pathname.startsWith(prefix)) return null;
-    return joinApiPath(config.apiBasePath,pathname.slice(prefix.length));
+    const rel=relativeForApiBase(pathname,spec.pathname,config.apiBasePath);
+    if(rel===null) return null;
+    return joinApiPath(config.apiBasePath,rel);
   } catch { return null; }
 }
 
