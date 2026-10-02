@@ -58,6 +58,22 @@ describe('OpenList IPA metadata sync contract',()=>{
     expect(library).toContain("icon_status:String(value?.icon_status||'')");
   });
 
+  test('range parser validates partial responses and classifies failures',()=>{
+    const parser=fs.readFileSync(`${root}/scripts/ipa-range-info.py`,'utf8');
+    const service=fs.readFileSync(`${root}/apps/api/src/services/openListMetadataService.js`,'utf8');
+    expect(parser).toContain('Content-Range');
+    expect(parser).toContain('RANGE_MISMATCH');
+    expect(parser).toContain('RANGE_TRUNCATED');
+    expect(parser).toContain('NOT_ZIP');
+    expect(parser).toContain('ZIP_CORRUPTED');
+    expect(parser).toContain('MAX_ATTEMPTS = 3');
+    expect(parser).toContain('BLOCK = 512 * 1024');
+    expect(parser).toContain('MAX_FETCH = 32 * 1024 * 1024');
+    expect(service).toContain('parserTimeoutMs');
+    expect(service).toContain("e.code='PARSER_TIMEOUT'");
+    expect(service).toContain('parseErrorCode');
+  });
+
   test('failed parses have an explicit retry path and icon extraction is limited to requested names',()=>{
     const service=fs.readFileSync(`${root}/apps/api/src/services/openListMetadataService.js`,'utf8');
     const routes=fs.readFileSync(`${root}/apps/api/src/routes/admin.js`,'utf8');
