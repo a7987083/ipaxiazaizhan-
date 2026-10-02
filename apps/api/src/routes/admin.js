@@ -5,7 +5,7 @@ import { asyncHandler,ok,AppError } from '../utils/http.js';
 import { csrfToken } from '../utils/crypto.js';
 import { login,changePassword } from '../services/authService.js';
 import { getOnlineUpdateStatus,queueOnlineUpdate } from '../services/updateService.js';
-import { getOpenListIpaStatus,queueOpenListIpaMetadata,testOpenListConnection,listMissingOpenListEntries,listOpenListParseResults,resetOpenListScheduler } from '../services/openListMetadataService.js';
+import { getOpenListIpaStatus,queueOpenListIpaMetadata,queueRetryFailedOpenListIpaMetadata,testOpenListConnection,listMissingOpenListEntries,listOpenListParseResults,resetOpenListScheduler } from '../services/openListMetadataService.js';
 import { testMysqlSource } from '../services/mysqlCli.js';
 import { getMysqlSource,saveOpenListConfig,saveOpenListSchedule } from '../storage/controlStore.js';
 import { loginLimiter } from '../middleware/rateLimit.js';
@@ -101,6 +101,22 @@ r.post('/openlist/sync',asyncHandler(async(req,res)=>{
     if(e?.code==='OPENLIST_CONFIG_REQUIRED') throw new AppError(400,'OPENLIST_CONFIG_REQUIRED',e.message);
     if(e?.code==='OPENLIST_DISABLED') throw new AppError(409,'OPENLIST_DISABLED',e.message);
     throw new AppError(502,'OPENLIST_SYNC_FAILED',`OpenList 同步失败：${e.message}`);
+  }
+}));
+
+r.post('/openlist/retry-failed',asyncHandler(async(req,res)=>{
+  const p=z.object({
+    apiPaths:z.array(z.string().min(1)).max(20).optional().default([]),
+    all:z.boolean().optional().default(false),
+    limit:z.coerce.number().int().min(1).max(20).optional().default(20)
+  }).parse(req.body||{});
+  try { ok(res,await queueRetryFailedOpenListIpaMetadata(p)); }
+  catch(e){
+    if(e?.code==='OPENLIST_TASK_BUSY') throw new AppError(409,'OPENLIST_TASK_BUSY',e.message);
+    if(e?.code==='OPENLIST_CONFIG_REQUIRED') throw new AppError(400,'OPENLIST_CONFIG_REQUIRED',e.message);
+    if(e?.code==='OPENLIST_DISABLED') throw new AppError(409,'OPENLIST_DISABLED',e.message);
+    if(e?.code==='OPENLIST_NO_FAILED') throw new AppError(404,'OPENLIST_NO_FAILED',e.message);
+    throw new AppError(502,'OPENLIST_RETRY_FAILED',`失败项重试启动失败：${e.message}`);
   }
 }));
 
