@@ -218,12 +218,17 @@ async function readReferencedIpas(config,{taskIdValue=null}={}) {
   return {refs,ignored,sourceErrors};
 }
 
-async function parseWithPython(rawUrl,size,timeoutMs=45000) {
+function parserTimeoutMs(size){
+  const mb=Math.max(0,Number(size||0))/(1024*1024);
+  return Math.min(180000,Math.max(60000,60000+Math.round(mb/100)*15000));
+}
+
+async function parseWithPython(rawUrl,size,timeoutMs=parserTimeoutMs(size)) {
   return new Promise((resolve,reject)=>{
     const child=spawn('python3',[PARSER],{stdio:['pipe','pipe','pipe']});
     let out='',err='',done=false;
     const finish=(fn,value)=>{if(done)return;done=true;clearTimeout(timer);fn(value)};
-    const timer=setTimeout(()=>{child.kill('SIGKILL');const e=new Error('IPA Range 解析超时');e.rangeBytes=0;e.rangeRequests=0;finish(reject,e)},timeoutMs);
+    const timer=setTimeout(()=>{child.kill('SIGKILL');const e=new Error(`IPA Range 解析超时（${Math.round(timeoutMs/1000)} 秒）`);e.code='PARSER_TIMEOUT';e.rangeBytes=0;e.rangeRequests=0;finish(reject,e)},timeoutMs);
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data',d=>out+=d); child.stderr.on('data',d=>err+=d);
     child.on('error',e=>finish(reject,e));
@@ -234,6 +239,7 @@ async function parseWithPython(rawUrl,size,timeoutMs=45000) {
         const data=JSON.parse(line);
         if(code!==0 || data?.ok!==true) {
           const e=new Error(data?.error||err.trim()||`parser exited ${code}`);
+          e.code=String(data?.error_code||'PARSER_ERROR');
           e.rangeBytes=Number(data?.range_bytes||0);e.rangeRequests=Number(data?.range_requests||0);
           return finish(reject,e);
         }
@@ -380,7 +386,7 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
         parsed.icon_status='missing';
         files[apiPath].iconUploadError='';
       }
-      files[apiPath].parsed=parsed; files[apiPath].parsedMd5=files[apiPath].md5||''; files[apiPath].parsedAt=nowIso(); files[apiPath].parseError=''; files[apiPath].nextParseAfter=null;
+      files[apiPath].parsed=parsed; files[apiPath].parsedMd5=files[apiPath].md5||''; files[apiPath].parsedAt=nowIso(); files[apiPath].parseError=''; files[apiPath].parseErrorCode=''; files[apiPath].nextParseAfter=null;
       files[apiPath].rangeBytes=Number(result.rangeBytes||0);files[apiPath].rangeRequests=Number(result.rangeRequests||0);
       parsedNow+=1;rangeBytesNow+=files[apiPath].rangeBytes;rangeRequestsNow+=files[apiPath].rangeRequests;
       await appendRangeUsage({at:nowIso(),success:true,apiPath,md5:files[apiPath].md5,size:files[apiPath].size,rangeBytes:files[apiPath].rangeBytes,rangeRequests:files[apiPath].rangeRequests});
@@ -394,7 +400,7 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
       }
     } catch(e) {
       const rb=Number(e?.rangeBytes||0),rr=Number(e?.rangeRequests||0);rangeBytesNow+=rb;rangeRequestsNow+=rr;
-      files[apiPath].parseError=String(e?.message||'解析失败').slice(0,500); files[apiPath].lastParseAttemptAt=nowIso(); files[apiPath].nextParseAfter=new Date(Date.now()+PARSE_RETRY_DELAY_MS).toISOString(); files[apiPath].rangeBytes=rb;files[apiPath].rangeRequests=rr;parseFailedNow+=1;
+      files[apiPath].parseError=String(e?.message||'解析失败').slice(0,500); files[apiPath].parseErrorCode=String(e?.code||'PARSER_ERROR').slice(0,80); files[apiPath].lastParseAttemptAt=nowIso(); files[apiPath].nextParseAfter=new Date(Date.now()+PARSE_RETRY_DELAY_MS).toISOString(); files[apiPath].rangeBytes=rb;files[apiPath].rangeRequests=rr;parseFailedNow+=1;
       await appendRangeUsage({at:nowIso(),success:false,apiPath,md5:files[apiPath].md5,size:files[apiPath].size,rangeBytes:rb,rangeRequests:rr,error:files[apiPath].parseError});
     }
     await updateTask(taskIdValue,{progress:{parseTarget:selected.length,parseDone:i+1,parsedSuccess:parsedNow,parsedFailed:parseFailedNow,rangeBytesNow,rangeRequestsNow}});
