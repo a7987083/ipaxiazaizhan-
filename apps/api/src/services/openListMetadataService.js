@@ -13,6 +13,7 @@ import {
 } from './ipaMetadataLibrary.js';
 import { appendRangeUsage,getRangeUsageStatus } from './rangeUsageService.js';
 import { env } from '../config/env.js';
+import { autoWriteBackTick } from './ipaWriteBackService.js';
 
 const PARSER = fileURLToPath(new URL('../../../../scripts/ipa-range-info.py', import.meta.url));
 const DIRECTORY_CACHE_TTL_MS = 30*60*1000;
@@ -405,6 +406,7 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
   const lastSync={finishedAt:nowIso(),databaseRefs:refs.length,ignoredRefs:ignored,uniqueFiles:expected.length,foundFiles:expected.length-missingFiles,missingFiles,missingRefs:missingEntries.length,newFiles,changedFiles,unchangedFiles,metadataReusedByMd5,parsedNow,parseFailedNow,pendingParse:pending.length,eligibleParse:eligiblePending.length,rangeBytesNow,rangeRequestsNow,cacheHits,cacheRefreshes,directoryCacheMinutes:30,sourceErrors,rangeUsage};
   await updateTask(taskIdValue,{stage:'saving',message:'正在保存 IPA 元数据缓存',progress:{pendingParse:pending.length,eligibleParse:eligiblePending.length,rangeBytesNow,rangeRequestsNow}});
   await writeOpenListIpaCache({version:3,files,apps,appRefs,missingEntries,lastSync});
+  if(parsedNow>0) setImmediate(()=>autoWriteBackTick().catch(e=>console.error('Automatic IPA write-back:',e?.message||e)));
   return lastSync;
 }
 
