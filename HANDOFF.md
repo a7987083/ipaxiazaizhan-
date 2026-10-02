@@ -1,5 +1,17 @@
 # Handoff
 
+## 2026-10-02 current work
+
+- Current functional HEAD before documentation-only commits: `5783eec56943b6f22b317629786a64814711c826`.
+- Current VERSION: `2026100103`.
+- GitHub Actions run `37015198165`: `validate=success`, `package-and-release=success`, `release-e2e=skipped` by branch condition.
+- Artifact: `zonoe-ipa-download-2026100103-baota-native-build`, id `11229312175`, digest `sha256:d2a1a1756d3e5727e884f1cee0d91023c03fc134e17d99e4f96d21476aa6e899`.
+- Implemented: manual retry for failed IPA parsing; OpenList `modified` write-back source for `updatetime`; narrow AppIcon60x60/76x76 extraction; token-authenticated icon upload client; `icon_url -> image` write-back source.
+- Cross-repo dependency: `a7987083/app-` branch `feature/ipa-icon-upload-api-20261002`, draft PR #27, commit `47d32772e6179e42e8fff6f7b36009d9207b35f3`.
+- Deployment prerequisite: set the same icon-upload token on app3 and ipaxiazaizhan; do not store it in Git.
+- Unresolved: brand-new rows with empty `bt1a` have no deterministic OpenList `apiPath` association. Do not infer by display name.
+
+
 - Repo: `a7987083/ipaxiazaizhan-`
 - Branch: `feature/baota-native-deploy-v1`
 - Candidate: `2026091232`
