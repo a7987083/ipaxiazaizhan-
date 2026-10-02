@@ -2,7 +2,7 @@ import { describe,expect,test } from 'vitest';
 import { buildWriteBackPlan,normalizeWriteBackConfig,validateWriteBackConfig } from '../src/services/ipaWriteBackService.js';
 
 describe('IPA write-back mapping',()=>{
-  const columns=[{name:'name'},{name:'nickname'},{name:'bundle_id'},{name:'bt1a'},{name:'bt2a'},{name:'min_ios'}];
+  const columns=[{name:'name'},{name:'nickname'},{name:'bundle_id'},{name:'bt1a'},{name:'bt2a'},{name:'min_ios'},{name:'updatetime'},{name:'image'}];
 
   test('write-back defaults stay disabled and expose editable rules',()=>{
     const cfg=normalizeWriteBackConfig({});
@@ -40,6 +40,25 @@ describe('IPA write-back mapping',()=>{
     expect(changes[0].field).toBe('download_url');
     expect(changes[0].column).toBe('bt1a');
     expect(changes[0].willWrite).toBe(true);
+  });
+
+  test('OpenList modified time and uploaded icon can map to updatetime/image',()=>{
+    const cfg=normalizeWriteBackConfig({
+      enabled:true,
+      rules:[
+        {id:'mtime',enabled:true,source:'openlist_modified',column:'updatetime',strategy:'changed'},
+        {id:'icon',enabled:true,source:'icon_url',column:'image',strategy:'changed'}
+      ]
+    });
+    const out=validateWriteBackConfig(cfg,columns);
+    expect(out.ok).toBe(true);
+    const changes=buildWriteBackPlan({
+      metadata:{openlist_modified:'1790942400',icon_url:'https://app3.zonoeios.xyz/uploads/20261002/icon.png'},
+      current:{updatetime:'1',image:''},
+      config:cfg
+    });
+    expect(changes.map(x=>x.column)).toEqual(['updatetime','image']);
+    expect(changes.every(x=>x.willWrite)).toBe(true);
   });
 
   test('duplicate target columns are rejected even with custom rules',()=>{
