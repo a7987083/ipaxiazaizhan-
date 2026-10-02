@@ -1,5 +1,12 @@
 # Known Issues
 
+## 2026-10-02 current work
+
+- 新建 App 且 `bt1a` 为空时，当前 OpenList 元数据发现链不会建立 `appKey -> apiPath` 关联，因为引用读取仍要求 `bt1a IS NOT NULL AND bt1a<>''`。在没有稳定关联键的情况下不能安全地按 App 名称猜 IPA 文件，因此“空 `bt1a` 自动回填”对首次关联的 App 仍未完成。
+- App 图标上传依赖 `a7987083/app-` draft PR #27 合并部署，并在两端配置相同的 server-to-server token。未配置 token 时 IPA 主解析继续成功，但不会生成 `icon_url`。
+- AppIcon 当前只处理 `AppIcon60x60*.png` / `AppIcon76x76*.png`；没有这两类资源时按需求静默忽略，不处理 `Assets.car`。
+
+
 ## 2026091232 candidate
 
 - Functional GitHub Actions run `34878831197` / run #162 entered the real `.github/workflows/ci-release.yml` workflow and passed Integration tests, Production build, Native API smoke, Native frontend static smoke, Shell validation, BaoTa native contract, MySQL multi-source contract, GitHub updater contract, Legacy Docker compose syntax, deployment package build/validation and artifact upload. `release-e2e` and GitHub Release publish were skipped by workflow condition.
