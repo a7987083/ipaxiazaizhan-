@@ -47,6 +47,17 @@ describe('OpenList IPA metadata sync contract',()=>{
     expect(smallDelta.sizeMismatch).toBe(false);
   });
 
+  test('failed parses have an explicit retry path and icon extraction is limited to requested names',()=>{
+    const service=fs.readFileSync(`${root}/apps/api/src/services/openListMetadataService.js`,'utf8');
+    const routes=fs.readFileSync(`${root}/apps/api/src/routes/admin.js`,'utf8');
+    const parser=fs.readFileSync(`${root}/scripts/ipa-range-info.py`,'utf8');
+    expect(service).toContain('queueRetryFailedOpenListIpaMetadata');
+    expect(service).toContain('retryFailedPaths');
+    expect(routes).toContain("/openlist/retry-failed");
+    expect(parser).toContain("AppIcon(60x60|76x76)");
+    expect(parser).not.toContain('Assets.car');
+  });
+
   test('scheduler is configurable and the saved per-run count is authoritative',()=>{
     expect(RECOMMENDED_OPENLIST_SCHEDULE.intervalMinutes).toBe(15);
     expect(RECOMMENDED_OPENLIST_SCHEDULE.parseLimit).toBe(1);
