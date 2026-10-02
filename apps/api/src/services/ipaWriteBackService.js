@@ -17,6 +17,8 @@ export const WRITEBACK_SOURCES=[
   {key:'minimum_ios',label:'最低 iOS',suggest:['min_ios','minimum_ios','minimumosversion'],defaultStrategy:'empty'},
   {key:'file_size',label:'IPA 实际大小',suggest:['bt2a','file_size','size'],defaultStrategy:'changed'},
   {key:'download_url',label:'IPA 下载链接',suggest:['bt1a','download_url','url'],defaultStrategy:'changed'},
+  {key:'openlist_modified',label:'OpenList 文件修改时间',suggest:['updatetime'],defaultStrategy:'changed'},
+  {key:'icon_url',label:'IPA App 图标 URL',suggest:['image'],defaultStrategy:'changed'},
   {key:'executable',label:'Executable',suggest:['executable'],defaultStrategy:'empty'},
   {key:'md5',label:'IPA MD5',suggest:['md5','ipa_md5'],defaultStrategy:'changed'}
 ];
@@ -200,6 +202,12 @@ function canonicalDownloadUrl(openListRow,apiPath=''){
   }catch{return ''}
 }
 
+function unixSeconds(value){
+  if(value===null||value===undefined||value==='')return '';
+  if(/^\d+$/.test(String(value).trim()))return String(Math.floor(Number(value)));
+  const ms=Date.parse(String(value));
+  return Number.isFinite(ms)&&ms>0?String(Math.floor(ms/1000)):'';
+}
 function metadataValues(file,{downloadUrl=''}={}){
   const p=file?.parsed||{};
   return {
@@ -210,12 +218,14 @@ function metadataValues(file,{downloadUrl=''}={}){
     minimum_ios:String(p.minimum_ios||''),
     file_size:Number(file?.size||0)>0?String(Math.round(Number(file.size))):'',
     download_url:String(downloadUrl||'').trim(),
+    openlist_modified:unixSeconds(file?.modified),
+    icon_url:String(p.icon_url||'').trim(),
     executable:String(p.executable||''),
     md5:String(file?.md5||'').toUpperCase()
   };
 }
 function sameValue(sourceKey,a,b){
-  if(sourceKey==='file_size')return Number(a||0)===Number(b||0);
+  if(sourceKey==='file_size'||sourceKey==='openlist_modified')return Number(a||0)===Number(b||0);
   return String(a??'').trim()===String(b??'').trim();
 }
 export function buildWriteBackPlan({metadata={},current={},config={}}={}){
@@ -300,7 +310,7 @@ export async function previewSourceWriteBack(sourceId,{limit=50,afterAppKey='',a
   };
 }
 function sqlValue(sourceKey,value){
-  if(sourceKey==='file_size')return sqlInt(value);
+  if(sourceKey==='file_size'||sourceKey==='openlist_modified')return sqlInt(value);
   return sqlText(value);
 }
 async function appendHistory(event){
