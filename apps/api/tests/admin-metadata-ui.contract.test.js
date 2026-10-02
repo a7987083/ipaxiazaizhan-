@@ -14,6 +14,8 @@ describe('admin IPA metadata and dynamic sync UI',()=>{
     expect(s).toContain('打开下载地址');
     expect(s).toContain('/openlist/results-rich');
     expect(s).toContain('缺失 IPA 对应数据库条目');
+    expect(s).toContain('重新解析');
+    expect(s).toContain('/openlist/retry-failed');
   });
 
   test('write-back mapping is dynamic and understandable',()=>{
@@ -23,6 +25,11 @@ describe('admin IPA metadata and dynamic sync UI',()=>{
     expect(s).toContain('IPA 解析成功后自动写入数据库');
     expect(s).toContain('选择数据来源');
     expect(s).toContain('bt1a');
+    const svc=read('apps/api/src/services/ipaWriteBackService.js');
+    expect(svc).toContain('OpenList 文件修改时间');
+    expect(svc).toContain("suggest:['updatetime']");
+    expect(svc).toContain('IPA App 图标 URL');
+    expect(svc).toContain("suggest:['image']");
   });
 
   test('admin rich results route keeps download URLs admin-only',()=>{
