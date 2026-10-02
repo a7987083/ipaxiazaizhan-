@@ -3,11 +3,13 @@ import { env } from './config/env.js';
 import { ensureControlInitialized } from './storage/controlStore.js';
 import { startOpenListScheduler } from './services/openListMetadataService.js';
 import { startIpaMetadataPersistence } from './services/ipaMetadataPersistenceService.js';
+import { startWriteBackScheduler } from './services/ipaWriteBackService.js';
 import { startReplicaOperationVerifier,stopReplicaOperationVerifier } from './services/openListReplicaService.js';
 
 await ensureControlInitialized();
 await startIpaMetadataPersistence();
 await startOpenListScheduler();
+startWriteBackScheduler();
 startReplicaOperationVerifier();
 const app = createApp();
 const server = app.listen(env.PORT, env.HOST, () => {
