@@ -1,5 +1,16 @@
 # Development Changelog
 
+## 2026-10-02 — failed-parse retry + OpenList mtime/image write-back
+
+- OpenList 解析失败新增专用 `POST /api/v1/admin/openlist/retry-failed`，单条可“重新解析”，后台可一次重试最多 20 个失败项；人工重试会绕过原 30 分钟 `nextParseAfter` cooldown，但仍保持单并发解析。
+- 数据同步新增“OpenList 文件修改时间”来源，转换成 Unix 秒后可映射到 MySQL `updatetime`；`createtime` 不参与本次写回。
+- IPA Range Parser 只提取 `AppIcon60x60*.png` / `AppIcon76x76*.png`，不处理 `Assets.car`；找不到图标不会影响主解析。
+- 图标上传采用独立 server-to-server token；上传成功后的完整 URL 保存在解析元数据 `icon_url`，同步规则新增“IPA App 图标 URL”并建议映射到 `image`。
+- `a7987083/app-` 已建立配套 draft PR #27，新增 `POST /api/common/iconupload`，文件落到 `/uploads/YYYYMMDD/<md5>.<ext>`，密钥不入库。
+- 首轮 CI 在 `scripts/ipa-range-info.py` 命中真实语法错误后已修复。功能 HEAD `5783eec56943b6f22b317629786a64814711c826` 的 Actions run `37015198165`：validate success，package-and-release success，release-e2e 按分支条件 skipped。
+- 新发现：新建 App 若 `bt1a` 从未存在，当前引用扫描 SQL 会过滤该记录，因此无法仅凭现有数据可靠反推出它对应哪个 OpenList IPA。此场景需要额外的确定性关联键/规则，不能用 App 名称猜测。
+
+
 ## 2026-09-15 — 2026091232 Replica copy lifecycle + verification + audit
 
 - OpenList `/api/fs/copy` 返回成功不再直接等同于“副本复制完成”。新增 `CONTROL_DIR/openlist-replica-operations.json`，持久保存复制批次、每个 IPA 的复制状态和操作审计；文件采用临时文件 + rename 原子写入并保持 `0600` 权限。
