@@ -16,7 +16,9 @@ function cleanParsed(value={}){
     build:String(value?.build||''),
     bundle_id:String(value?.bundle_id||''),
     minimum_ios:String(value?.minimum_ios||''),
-    executable:String(value?.executable||'')
+    executable:String(value?.executable||''),
+    icon_url:String(value?.icon_url||''),
+    icon_status:String(value?.icon_status||'')
   };
 }
 function validParsed(value){
