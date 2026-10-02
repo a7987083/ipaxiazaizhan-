@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import base64
 import io
 import json
 import plistlib
@@ -116,6 +117,63 @@ def main():
             raise RuntimeError('Info.plist 异常过大')
         raw = zf.read(info)
         plist = plistlib.loads(raw)
+
+        app_root = info.filename.rsplit('/', 1)[0] + '/'
+        icon_entries = []
+        for entry in zf.infolist():
+            if not entry.filename.startswith(app_root) or entry.is_dir():
+                continue
+            base = entry.filename.rsplit('/', 1)[-1]
+            m = re.match(r'^AppIcon(60x60|76x76)([^/]*)\.png        'ok': True,
+        'name': name,
+        'version': clean(plist.get('CFBundleShortVersionString')),
+        'build': clean(plist.get('CFBundleVersion')),
+        'bundle_id': clean(plist.get('CFBundleIdentifier')),
+        'minimum_ios': clean(plist.get('MinimumOSVersion')),
+        'executable': clean(plist.get('CFBundleExecutable')),
+        'icon': icon,
+        'range_bytes': remote.fetched,
+        'range_requests': remote.requests,
+    }
+    print(json.dumps(result, ensure_ascii=False, separators=(',', ':')))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as e:
+        print(json.dumps({
+            'ok': False,
+            'error': str(e)[:500],
+            'range_bytes': int(LAST_METRICS.get('range_bytes') or 0),
+            'range_requests': int(LAST_METRICS.get('range_requests') or 0),
+        }, ensure_ascii=False, separators=(',', ':')))
+        sys.exit(1)
+, base, re.I)
+            if not m:
+                continue
+            size_key = 0 if m.group(1).lower() == '60x60' else 1
+            scale_key = 0
+            lower = base.lower()
+            if '@3x' in lower:
+                scale_key = 0
+            elif '@2x' in lower:
+                scale_key = 1
+            else:
+                scale_key = 2
+            icon_entries.append((size_key, scale_key, len(base), entry))
+
+        icon = None
+        if icon_entries:
+            icon_entry = sorted(icon_entries, key=lambda x: (x[0], x[1], x[2]))[0][3]
+            if icon_entry.file_size <= 2 * 1024 * 1024:
+                icon_bytes = zf.read(icon_entry)
+                if icon_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+                    icon = {
+                        'name': icon_entry.filename.rsplit('/', 1)[-1],
+                        'mime': 'image/png',
+                        'base64': base64.b64encode(icon_bytes).decode('ascii'),
+                    }
 
     name = clean(plist.get('CFBundleDisplayName')) or clean(plist.get('CFBundleName'))
     result = {
