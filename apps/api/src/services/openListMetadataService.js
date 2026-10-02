@@ -248,7 +248,8 @@ async function parseWithPython(rawUrl,size,timeoutMs=45000) {
 }
 
 async function uploadParsedIcon(icon) {
-  if(!icon?.base64 || !env.ICON_UPLOAD_TOKEN) return '';
+  if(!icon?.base64) return '';
+  if(!env.ICON_UPLOAD_TOKEN) throw new Error('ICON_UPLOAD_TOKEN 未配置');
   const bytes=Buffer.from(String(icon.base64),'base64');
   if(!bytes.length || bytes.length>2*1024*1024) throw new Error('AppIcon 大小无效');
   const name=/^[A-Za-z0-9_.@~-]+$/.test(String(icon.name||''))?String(icon.name):'AppIcon.png';
@@ -365,11 +366,18 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
       if(result.icon){
         try {
           const iconUrl=await uploadParsedIcon(result.icon);
-          if(iconUrl) parsed.icon_url=iconUrl;
+          if(iconUrl){
+            parsed.icon_url=iconUrl;
+            parsed.icon_status='found';
+          }
           files[apiPath].iconUploadError='';
         } catch(iconError) {
+          parsed.icon_status='upload_failed';
           files[apiPath].iconUploadError=String(iconError?.message||'图标上传失败').slice(0,500);
         }
+      } else {
+        parsed.icon_status='missing';
+        files[apiPath].iconUploadError='';
       }
       files[apiPath].parsed=parsed; files[apiPath].parsedMd5=files[apiPath].md5||''; files[apiPath].parsedAt=nowIso(); files[apiPath].parseError=''; files[apiPath].nextParseAfter=null;
       files[apiPath].rangeBytes=Number(result.rangeBytes||0);files[apiPath].rangeRequests=Number(result.rangeRequests||0);
