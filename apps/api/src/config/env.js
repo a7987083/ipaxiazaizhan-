@@ -22,7 +22,10 @@ const schema = z.object({
   MYSQL_BIN: z.string().optional(),
   LOCAL_STORAGE_DIR: z.string().default('/data/uploads'),
   MAX_UPLOAD_MB: z.coerce.number().int().positive().default(4096),
-  DOWNLOAD_RATE_LIMIT: z.coerce.number().int().positive().default(120)
+  DOWNLOAD_RATE_LIMIT: z.coerce.number().int().positive().default(120),
+  ICON_UPLOAD_URL: z.string().url().default('https://app3.zonoeios.xyz/api/common/iconupload'),
+  ICON_PUBLIC_BASE_URL: z.string().url().default('https://app3.zonoeios.xyz'),
+  ICON_UPLOAD_TOKEN: z.string().optional()
 });
 
 const parsed=schema.parse(process.env);
