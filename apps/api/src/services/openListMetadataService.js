@@ -12,6 +12,7 @@ import {
   rememberParsedMetadata,writeIpaMetadataLibrary
 } from './ipaMetadataLibrary.js';
 import { appendRangeUsage,getRangeUsageStatus } from './rangeUsageService.js';
+import { env } from '../config/env.js';
 
 const PARSER = fileURLToPath(new URL('../../../../scripts/ipa-range-info.py', import.meta.url));
 const DIRECTORY_CACHE_TTL_MS = 30*60*1000;
@@ -237,12 +238,41 @@ async function parseWithPython(rawUrl,size,timeoutMs=45000) {
         }
         finish(resolve,{
           parsed:{name:String(data.name||''),version:String(data.version||''),build:String(data.build||''),bundle_id:String(data.bundle_id||''),minimum_ios:String(data.minimum_ios||''),executable:String(data.executable||'')},
+          icon:data?.icon?.base64?{name:String(data.icon.name||'AppIcon.png'),mime:String(data.icon.mime||'image/png'),base64:String(data.icon.base64)}:null,
           rangeBytes:Number(data?.range_bytes||0),rangeRequests:Number(data?.range_requests||0)
         });
       } catch(e) { finish(reject,new Error(err.trim()||e.message||'IPA parser output invalid')); }
     });
     child.stdin.end(JSON.stringify({url:rawUrl,size:Number(size||0)}));
   });
+}
+
+async function uploadParsedIcon(icon) {
+  if(!icon?.base64 || !env.ICON_UPLOAD_TOKEN) return '';
+  const bytes=Buffer.from(String(icon.base64),'base64');
+  if(!bytes.length || bytes.length>2*1024*1024) throw new Error('AppIcon 大小无效');
+  const name=/^[A-Za-z0-9_.@~-]+$/.test(String(icon.name||''))?String(icon.name):'AppIcon.png';
+  const form=new FormData();
+  form.append('file',new Blob([bytes],{type:'image/png'}),name.endsWith('.png')?name:`${name}.png`);
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),20000);
+  try {
+    const response=await fetch(env.ICON_UPLOAD_URL,{
+      method:'POST',
+      headers:{'X-Zonoe-Upload-Token':env.ICON_UPLOAD_TOKEN},
+      body:form,
+      signal:controller.signal
+    });
+    const text=await response.text();
+    let body=null;
+    try { body=text?JSON.parse(text):null; } catch {}
+    if(!response.ok || Number(body?.code)!==1) throw new Error(body?.msg||`图标上传失败 HTTP ${response.status}`);
+    const raw=String(body?.data?.url||'').trim();
+    if(!raw) throw new Error('图标上传接口未返回 URL');
+    return new URL(raw,env.ICON_PUBLIC_BASE_URL).toString();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function parseOne(config,apiPath,file) {
@@ -266,7 +296,7 @@ function hasCurrentParse(file={}){
   return Boolean(file.parsed&&(!md5||normalizeMd5(file.parsedMd5||file.md5)===md5)&&!file.parseError);
 }
 
-export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=false,taskIdValue=null}={}) {
+export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=false,retryFailedPaths=[],taskIdValue=null}={}) {
   parseLimit=Math.max(0,Math.min(20,Number(parseLimit)||0));
   const row=await getOpenListConfig({withSecret:true});
   if(!row?.config?.url || !row?.config?.token) throw Object.assign(new Error('请先配置 OpenList'),{code:'OPENLIST_CONFIG_REQUIRED'});
@@ -314,10 +344,11 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
   }));
   await updateTask(taskIdValue,{stage:'compare',message:'MD5 对比完成',progress:{databaseRefs:refs.length,uniqueFiles:expected.length,foundFiles:expected.length-missingFiles,missingFiles,missingRefs:missingEntries.length,newFiles,changedFiles,unchangedFiles,metadataReusedByMd5,cacheHits,cacheRefreshes}});
 
-  const allCandidates=expected.filter(p=>files[p]&&!files[p].missing&&!hasCurrentParse(files[p]));
+  const retrySet=new Set((retryFailedPaths||[]).map(String).filter(Boolean));
+  const allCandidates=expected.filter(p=>files[p]&&!files[p].missing&&!hasCurrentParse(files[p])&&(!retrySet.size||retrySet.has(p)));
   const eligible=[];const seenMd5=new Set();
   for(const p of allCandidates){
-    if(files[p].nextParseAfter&&Date.parse(files[p].nextParseAfter)>Date.now())continue;
+    if(!retrySet.has(p)&&files[p].nextParseAfter&&Date.parse(files[p].nextParseAfter)>Date.now())continue;
     const md5=normalizeMd5(files[p].md5);
     if(md5&&seenMd5.has(md5))continue;
     if(md5)seenMd5.add(md5);
@@ -331,6 +362,15 @@ export async function syncOpenListIpaMetadata({parseLimit=0,forceListRefresh=fal
     try {
       const result=await parseOne(config,apiPath,files[apiPath]);
       const parsed=result.parsed;
+      if(result.icon){
+        try {
+          const iconUrl=await uploadParsedIcon(result.icon);
+          if(iconUrl) parsed.icon_url=iconUrl;
+          files[apiPath].iconUploadError='';
+        } catch(iconError) {
+          files[apiPath].iconUploadError=String(iconError?.message||'图标上传失败').slice(0,500);
+        }
+      }
       files[apiPath].parsed=parsed; files[apiPath].parsedMd5=files[apiPath].md5||''; files[apiPath].parsedAt=nowIso(); files[apiPath].parseError=''; files[apiPath].nextParseAfter=null;
       files[apiPath].rangeBytes=Number(result.rangeBytes||0);files[apiPath].rangeRequests=Number(result.rangeRequests||0);
       parsedNow+=1;rangeBytesNow+=files[apiPath].rangeBytes;rangeRequestsNow+=files[apiPath].rangeRequests;
@@ -369,16 +409,26 @@ async function runQueuedTask(spec) {
   } finally { taskLocked=false; }
 }
 
-export async function queueOpenListIpaMetadata({parseLimit=0,forceListRefresh=false,trigger='manual'}={}) {
+export async function queueOpenListIpaMetadata({parseLimit=0,forceListRefresh=false,retryFailedPaths=[],trigger='manual'}={}) {
   if(taskLocked) throw Object.assign(new Error('已有 OpenList 扫描/解析任务正在运行'),{code:'OPENLIST_TASK_BUSY'});
   const cfg=await getOpenListConfig({withSecret:true});
   if(!cfg?.config?.url || !cfg?.config?.token) throw Object.assign(new Error('请先配置 OpenList'),{code:'OPENLIST_CONFIG_REQUIRED'});
   if(cfg.enabled===false) throw Object.assign(new Error('OpenList 元数据同步已停用'),{code:'OPENLIST_DISABLED'});
   const id=taskId(); taskLocked=true;
-  const spec={id,state:'queued',stage:'queued',message:'任务已进入后台队列',trigger,parseLimit:Math.max(0,Math.min(20,Number(parseLimit)||0)),forceListRefresh:!!forceListRefresh,queuedAt:nowIso(),startedAt:null,finishedAt:null,progress:{}};
+  const spec={id,state:'queued',stage:'queued',message:'任务已进入后台队列',trigger,parseLimit:Math.max(0,Math.min(20,Number(parseLimit)||0)),forceListRefresh:!!forceListRefresh,retryFailedPaths:[...new Set((retryFailedPaths||[]).map(String).filter(Boolean))].slice(0,20),queuedAt:nowIso(),startedAt:null,finishedAt:null,progress:{}};
   try { await writeOpenListTask(spec); } catch(e) { taskLocked=false; throw e; }
   setImmediate(()=>runQueuedTask(spec));
   return spec;
+}
+
+export async function queueRetryFailedOpenListIpaMetadata({apiPaths=[],all=false,limit=20}={}) {
+  limit=Math.min(20,Math.max(1,Number(limit)||20));
+  const cache=await readOpenListIpaCache();
+  const failed=Object.entries(cache.files||{}).filter(([,file])=>file&&!file.missing&&file.parseError).map(([apiPath])=>apiPath);
+  const requested=new Set((apiPaths||[]).map(String).filter(Boolean));
+  const targets=(all?failed:failed.filter(p=>requested.has(p))).slice(0,limit);
+  if(!targets.length) throw Object.assign(new Error('没有可重试的解析失败 IPA'),{code:'OPENLIST_NO_FAILED'});
+  return queueOpenListIpaMetadata({parseLimit:targets.length,forceListRefresh:false,retryFailedPaths:targets,trigger:'retry-failed'});
 }
 
 export async function listMissingOpenListEntries({page=1,pageSize=100,q=''}={}) {
