@@ -47,6 +47,17 @@ describe('OpenList IPA metadata sync contract',()=>{
     expect(smallDelta.sizeMismatch).toBe(false);
   });
 
+  test('automatic write-back is started and icon metadata survives MD5 persistence',()=>{
+    const server=fs.readFileSync(`${root}/apps/api/src/server.js`,'utf8');
+    const service=fs.readFileSync(`${root}/apps/api/src/services/openListMetadataService.js`,'utf8');
+    const library=fs.readFileSync(`${root}/apps/api/src/services/ipaMetadataLibrary.js`,'utf8');
+    expect(server).toContain('startWriteBackScheduler()');
+    expect(service).toContain('autoWriteBackTick');
+    expect(service).toContain("ICON_UPLOAD_TOKEN 未配置");
+    expect(library).toContain("icon_url:String(value?.icon_url||'')");
+    expect(library).toContain("icon_status:String(value?.icon_status||'')");
+  });
+
   test('failed parses have an explicit retry path and icon extraction is limited to requested names',()=>{
     const service=fs.readFileSync(`${root}/apps/api/src/services/openListMetadataService.js`,'utf8');
     const routes=fs.readFileSync(`${root}/apps/api/src/routes/admin.js`,'utf8');
