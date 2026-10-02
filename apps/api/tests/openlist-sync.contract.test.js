@@ -54,7 +54,7 @@ describe('OpenList IPA metadata sync contract',()=>{
     expect(service).toContain('queueRetryFailedOpenListIpaMetadata');
     expect(service).toContain('retryFailedPaths');
     expect(routes).toContain("/openlist/retry-failed");
-    expect(parser).toContain("AppIcon(60x60|76x76)");
+    expect(parser).toContain("AppIcon(?:60x60|76x76)");
     expect(parser).not.toContain('Assets.car');
   });
 
